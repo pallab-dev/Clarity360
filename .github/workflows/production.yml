@@ -6,11 +6,9 @@ on:
       - production
 
 jobs:
-  production-pipeline:
-    name: production-pipeline
+  pmd-scan:
+    name: PMD Scan
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -31,20 +29,105 @@ jobs:
       - name: Install Salesforce Scanner plugin
         run: sf plugins install @salesforce/sfdx-scanner
 
-      - name: Validate required production secrets
+      - name: Run PMD scan
         run: |
-          test -n "${{ secrets.DEVHUB_SFDX_URL }}" || { echo "Missing DEVHUB_SFDX_URL"; exit 1; }
-          test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
+          sf scanner run \
+            --target "./force-app/**/*.cls,./force-app/**/*.trigger" \
+            --engine pmd \
+            --severity-threshold 2 \
+            --format csv \
+            --outfile pmd-results.csv
 
-      - name: Write Dev Hub auth URL to file
-        run: echo "${{ secrets.DEVHUB_SFDX_URL }}" > devhub.sfdx-url
+      - name: Upload PMD results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pmd-results
+          path: pmd-results.csv
+          if-no-files-found: ignore
 
-      - name: Authenticate Dev Hub via sfdx-url
+  eslint-scan:
+    name: ESLint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Install Salesforce CLI
+        run: npm install -g @salesforce/cli
+
+      - name: Install Salesforce Scanner plugin
+        run: sf plugins install @salesforce/sfdx-scanner
+
+      - name: Run Salesforce Scanner security rules
         run: |
-          sf org login sfdx-url \
-            --sfdx-url-file devhub.sfdx-url \
-            --set-default-dev-hub \
-            --alias devhub
+          sf scanner run \
+            --target "./force-app" \
+            --category "Security" \
+            --severity-threshold 1 \
+            --format csv \
+            --outfile scanner-security-results.csv
+
+      - name: Upload scanner security results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scanner-security-results
+          path: scanner-security-results.csv
+          if-no-files-found: ignore
+
+  apex-tests:
+    name: Apex Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Install Salesforce CLI
+        run: npm install -g @salesforce/cli
+
+      - name: Validate required test org secret
+        run: test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
 
       - name: Write Testing Org auth URL to file
         run: echo "${{ secrets.TESTORG_SFDX_URL }}" > testorg.sfdx-url
@@ -55,29 +138,105 @@ jobs:
             --sfdx-url-file testorg.sfdx-url \
             --alias testorg
 
-      - name: Run quality gates
-        uses: ./.github/actions/quality-gates
+      - name: Run Apex tests with coverage
+        run: |
+          sf apex run test \
+            --target-org testorg \
+            --test-level RunLocalTests \
+            --code-coverage \
+            --result-format human \
+            --wait 30 | tee apex-test-results.txt
+          COVERAGE=$(awk '/Org Wide Coverage/ {gsub(/[^0-9]/, "", $NF); print $NF}' apex-test-results.txt | tail -n 1)
+          if [ -z "$COVERAGE" ]; then
+            echo "Unable to determine org-wide Apex coverage from test output."
+            exit 1
+          fi
+          if [ "$COVERAGE" -lt 75 ]; then
+            echo "Org-wide Apex coverage is below 75%: ${COVERAGE}%"
+            exit 1
+          fi
+
+      - name: Clean up auth file
+        if: always()
+        run: rm -f testorg.sfdx-url
+
+  promote-package:
+    name: Promote And Tag Release
+    runs-on: ubuntu-latest
+    needs:
+      - pmd-scan
+      - eslint-scan
+      - security-scan
+      - apex-tests
+    permissions:
+      contents: write
+    env:
+      DEVHUB_SFDX_URL: ${{ secrets.DEVHUB_SFDX_URL }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Salesforce CLI
+        run: npm install -g @salesforce/cli
+
+      - name: Validate production deployment prerequisites
+        run: |
+          if [ ! -f .version-id ]; then
+            echo ".version-id is not present. Promotion and release tagging are skipped."
+            exit 0
+          fi
+          test -n "$DEVHUB_SFDX_URL" || { echo "Missing DEVHUB_SFDX_URL"; exit 1; }
+
+      - name: Write Dev Hub auth URL to file
+        if: ${{ hashFiles('.version-id') != '' }}
+        run: echo "$DEVHUB_SFDX_URL" > devhub.sfdx-url
+
+      - name: Authenticate Dev Hub via sfdx-url
+        if: ${{ hashFiles('.version-id') != '' }}
+        run: |
+          sf org login sfdx-url \
+            --sfdx-url-file devhub.sfdx-url \
+            --set-default-dev-hub \
+            --alias devhub
 
       - name: Read beta version ID from .version-id file
+        if: ${{ hashFiles('.version-id') != '' }}
         id: ver
-        run: |
-          echo "VERSION_ID=$(cat .version-id)" >> "$GITHUB_OUTPUT"
+        run: echo "VERSION_ID=$(cat .version-id)" >> "$GITHUB_OUTPUT"
 
       - name: Promote package version from Beta to Released
+        if: ${{ hashFiles('.version-id') != '' }}
         run: |
           sf package version promote \
             --package ${{ steps.ver.outputs.VERSION_ID }} \
             --no-prompt
 
       - name: Skip PBO deployment until PBO org is available
+        if: ${{ hashFiles('.version-id') != '' }}
         run: echo "PBO deployment and smoke tests are disabled until PBOORG_SFDX_URL is configured."
 
       - name: Create a production Git release tag
+        if: ${{ hashFiles('.version-id') != '' }}
         run: |
           TAG="release-$(date +%Y%m%d%H%M%S)"
           git tag "$TAG"
           git push origin "$TAG"
 
-      - name: Clean up key files
+      - name: Clean up auth file
         if: always()
-        run: rm -f devhub.sfdx-url testorg.sfdx-url
+        run: rm -f devhub.sfdx-url
+
+  production-pipeline:
+    name: production-pipeline
+    runs-on: ubuntu-latest
+    needs:
+      - pmd-scan
+      - eslint-scan
+      - security-scan
+      - apex-tests
+      - promote-package
+    steps:
+      - name: Mark production pipeline successful
+        run: echo "Production pipeline completed successfully."

@@ -84,12 +84,14 @@ Add these secrets in GitHub Settings -> Secrets -> Actions.
 
 ## Quality gates
 
-Both pipelines call the shared composite action at `.github/actions/quality-gates/action.yml`. The gates run in this exact order and the pipeline stops immediately if any gate fails.
+Both pipelines now expose the quality checks as separate GitHub Actions jobs so the Actions UI shows a visible pipeline graph and the validations run in parallel. The package promotion or deployment job waits for all quality gate jobs to succeed before it starts.
 
-1. PMD static analysis using `sf scanner run` against `./force-app/**/*.cls` and `./force-app/**/*.trigger` with severity threshold `2`. Any severity 1 or 2 violation fails the pipeline.
-2. ESLint for LWC and Aura using `npm run lint` against `./force-app/**/*.js`. Any ESLint error fails the pipeline. Warnings are allowed.
-3. Salesforce Scanner security rules using `sf scanner run` against `./force-app` with category `Security` and severity threshold `1`. Any security violation fails the pipeline.
-4. Apex unit tests with code coverage using `sf apex run test` against the Testing Org alias `testorg`. Any test failure or org-wide Apex coverage below 75% fails the pipeline.
+1. PMD static analysis using `sf scanner run` against `./force-app/**/*.cls` and `./force-app/**/*.trigger` with severity threshold `2`. Any severity 1 or 2 violation fails the `PMD Scan` job.
+2. ESLint for LWC and Aura using `npm run lint` against `./force-app/**/*.js`. Any ESLint error fails the `ESLint` job. Warnings are allowed.
+3. Salesforce Scanner security rules using `sf scanner run` against `./force-app` with category `Security` and severity threshold `1`. Any security violation fails the `Security Scan` job.
+4. Apex unit tests with code coverage using `sf apex run test` against the Testing Org alias `testorg`. Any test failure or org-wide Apex coverage below 75% fails the `Apex Tests` job.
+
+The final branch protection checks remain `release-pipeline` and `production-pipeline`. Those jobs only pass when all upstream quality gate jobs and any eligible package actions complete successfully.
 
 ## AppExchange Security Review policy
 
@@ -102,19 +104,19 @@ Current temporary exception: the release workflow still runs auth, scanner, lint
 ## Pipeline flow diagram
 
 ```text
-feature/* ──PR──► release/N ──auto──► [Quality Gates]
-                                          │
-                                   [Build beta pkg]
-                                          │
-                                 [Deploy Testing Org]
-                                          │
-                       PR (sprint done) ◄─┘
-                          │
-                       production ──auto──► [Quality Gates]
+feature/* ──PR──► release/N ──auto──► [PMD] [ESLint] [Security] [Apex Tests]
+                                                           \    |    /
+                                                            [Build beta pkg]
+                                                                   │
+                                                          [Deploy Testing Org]
+                                                                   │
+                                              PR (sprint done) ◄───┘
                                                  │
-                                         [Promote Released]
-                                                 │
-                                        [Deploy PBO Org]
-                                                 │
-                                     [AppExchange listing]
+                                              production ──auto──► [PMD] [ESLint] [Security] [Apex Tests]
+                                                                                      \    |    /
+                                                                                  [Promote Released]
+                                                                                         │
+                                                                                [Deploy PBO Org]
+                                                                                         │
+                                                                             [AppExchange listing]
 ```
