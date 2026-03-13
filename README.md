@@ -79,8 +79,8 @@ Add these secrets in GitHub Settings -> Secrets -> Actions.
 | `DEVHUB_SFDX_URL` | SFDX auth URL for the Dev Hub org used by `sf org login sfdx-url` |
 | `TESTORG_SFDX_URL` | SFDX auth URL for the Testing Org used by `sf org login sfdx-url` |
 | `PBOORG_SFDX_URL` | Optional for now. Add this when the PBO Org is available to enable production installation and smoke tests. |
-| `PACKAGE_NAME` | Exact package name as registered in the Dev Hub |
-| `PACKAGE_ID` | `0Ho` package ID from the Dev Hub |
+| `PACKAGE_NAME` | Exact package name as registered in the Dev Hub. Optional until package creation is enabled. |
+| `PACKAGE_ID` | `0Ho` package ID from the Dev Hub. Optional for release pipeline smoke validation, required once package version creation is enabled. |
 
 ## Quality gates
 
@@ -96,6 +96,8 @@ Both pipelines call the shared composite action at `.github/actions/quality-gate
 Salesforce AppExchange security review is a one-time review unless the package introduces new permissions, new external access, new integrations, or materially broader exposure. Use the checklist in [.github/pull_request_template.md](/Users/pallabsaikia/Downloads/Clarity360/.github/pull_request_template.md) to flag changes that require a release manager review and potential re-submission.
 
 Current temporary exception: the production workflow promotes the package version but skips PBO installation and post-install smoke tests until a PBO org is available and `PBOORG_SFDX_URL` is configured.
+
+Current temporary exception: the release workflow still runs auth, scanner, lint, and Apex quality gates when `PACKAGE_ID` is not configured, but it skips beta package creation, Testing Org package install, `.version-id` persistence, and beta tagging.
 
 ## Pipeline flow diagram
 

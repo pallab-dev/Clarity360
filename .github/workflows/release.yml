@@ -35,7 +35,6 @@ jobs:
         run: |
           test -n "${{ secrets.DEVHUB_SFDX_URL }}" || { echo "Missing DEVHUB_SFDX_URL"; exit 1; }
           test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
-          test -n "${{ secrets.PACKAGE_ID }}" || { echo "Missing PACKAGE_ID"; exit 1; }
 
       - name: Write Dev Hub auth URL to file
         run: echo "${{ secrets.DEVHUB_SFDX_URL }}" > devhub.sfdx-url
@@ -61,6 +60,7 @@ jobs:
 
       - name: Build beta package version
         id: pkg
+        if: ${{ secrets.PACKAGE_ID != '' }}
         run: |
           RESULT=$(sf package version create \
             --package "${{ secrets.PACKAGE_ID }}" \
@@ -71,6 +71,7 @@ jobs:
           echo "VERSION_ID=$(echo "$RESULT" | jq -r '.result.SubscriberPackageVersionId')" >> "$GITHUB_OUTPUT"
 
       - name: Install beta package in Testing Org
+        if: ${{ steps.pkg.outputs.VERSION_ID != '' }}
         run: |
           sf package install \
             --package ${{ steps.pkg.outputs.VERSION_ID }} \
@@ -79,6 +80,7 @@ jobs:
             --wait 30
 
       - name: Run full test suite in Testing Org after install
+        if: ${{ steps.pkg.outputs.VERSION_ID != '' }}
         run: |
           sf apex run test \
             --target-org testorg \
@@ -88,6 +90,7 @@ jobs:
             --wait 30
 
       - name: Save version ID to .version-id file and commit
+        if: ${{ steps.pkg.outputs.VERSION_ID != '' }}
         run: |
           echo "${{ steps.pkg.outputs.VERSION_ID }}" > .version-id
           git config user.email "ci-bot@yourdomain.com"
@@ -97,10 +100,15 @@ jobs:
           git push
 
       - name: Create a Git tag for this beta
+        if: ${{ steps.pkg.outputs.VERSION_ID != '' }}
         run: |
           TAG="beta-${{ github.ref_name }}-$(date +%Y%m%d%H%M%S)"
           git tag "$TAG"
           git push origin "$TAG"
+
+      - name: Skip package build until PACKAGE_ID is configured
+        if: ${{ secrets.PACKAGE_ID == '' }}
+        run: echo "PACKAGE_ID is not configured. Package build, install, version persistence, and beta tagging are skipped."
 
       - name: Clean up key files
         if: always()
