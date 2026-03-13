@@ -31,27 +31,29 @@ jobs:
       - name: Install Salesforce Scanner plugin
         run: sf plugins install @salesforce/sfdx-scanner
 
-      - name: Write Dev Hub JWT key to file
-        run: echo "${{ secrets.DEVHUB_JWT_KEY }}" > devhub.key
-
-      - name: Authenticate Dev Hub via JWT
+      - name: Validate required release secrets
         run: |
-          sf org login jwt \
-            --client-id ${{ secrets.DEVHUB_CLIENT_ID }} \
-            --jwt-key-file devhub.key \
-            --username ${{ secrets.DEVHUB_USERNAME }} \
+          test -n "${{ secrets.DEVHUB_SFDX_URL }}" || { echo "Missing DEVHUB_SFDX_URL"; exit 1; }
+          test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
+          test -n "${{ secrets.PACKAGE_ID }}" || { echo "Missing PACKAGE_ID"; exit 1; }
+
+      - name: Write Dev Hub auth URL to file
+        run: echo "${{ secrets.DEVHUB_SFDX_URL }}" > devhub.sfdx-url
+
+      - name: Authenticate Dev Hub via sfdx-url
+        run: |
+          sf org login sfdx-url \
+            --sfdx-url-file devhub.sfdx-url \
             --set-default-dev-hub \
             --alias devhub
 
-      - name: Write Testing Org JWT key to file
-        run: echo "${{ secrets.TESTORG_JWT_KEY }}" > testorg.key
+      - name: Write Testing Org auth URL to file
+        run: echo "${{ secrets.TESTORG_SFDX_URL }}" > testorg.sfdx-url
 
-      - name: Authenticate Testing Org via JWT
+      - name: Authenticate Testing Org via sfdx-url
         run: |
-          sf org login jwt \
-            --client-id ${{ secrets.TESTORG_CLIENT_ID }} \
-            --jwt-key-file testorg.key \
-            --username ${{ secrets.TESTORG_USERNAME }} \
+          sf org login sfdx-url \
+            --sfdx-url-file testorg.sfdx-url \
             --alias testorg
 
       - name: Run quality gates
@@ -102,4 +104,4 @@ jobs:
 
       - name: Clean up key files
         if: always()
-        run: rm -f devhub.key testorg.key
+        run: rm -f devhub.sfdx-url testorg.sfdx-url

@@ -76,15 +76,9 @@ Add these secrets in GitHub Settings -> Secrets -> Actions.
 
 | Secret | Description |
 | --- | --- |
-| `DEVHUB_CLIENT_ID` | Connected App client ID for the Dev Hub org |
-| `DEVHUB_USERNAME` | Dev Hub org login username |
-| `DEVHUB_JWT_KEY` | Private key for Dev Hub JWT authentication in full PEM format |
-| `TESTORG_CLIENT_ID` | Connected App client ID for the Testing Org |
-| `TESTORG_USERNAME` | Testing Org login username |
-| `TESTORG_JWT_KEY` | Private key for Testing Org JWT authentication |
-| `PBOORG_CLIENT_ID` | Connected App client ID for the PBO Org |
-| `PBOORG_USERNAME` | PBO Org login username |
-| `PBOORG_JWT_KEY` | Private key for PBO Org JWT authentication |
+| `DEVHUB_SFDX_URL` | SFDX auth URL for the Dev Hub org used by `sf org login sfdx-url` |
+| `TESTORG_SFDX_URL` | SFDX auth URL for the Testing Org used by `sf org login sfdx-url` |
+| `PBOORG_SFDX_URL` | Optional for now. Add this when the PBO Org is available to enable production installation and smoke tests. |
 | `PACKAGE_NAME` | Exact package name as registered in the Dev Hub |
 | `PACKAGE_ID` | `0Ho` package ID from the Dev Hub |
 
@@ -100,6 +94,8 @@ Both pipelines call the shared composite action at `.github/actions/quality-gate
 ## AppExchange Security Review policy
 
 Salesforce AppExchange security review is a one-time review unless the package introduces new permissions, new external access, new integrations, or materially broader exposure. Use the checklist in [.github/pull_request_template.md](/Users/pallabsaikia/Downloads/Clarity360/.github/pull_request_template.md) to flag changes that require a release manager review and potential re-submission.
+
+Current temporary exception: the production workflow promotes the package version but skips PBO installation and post-install smoke tests until a PBO org is available and `PBOORG_SFDX_URL` is configured.
 
 ## Pipeline flow diagram
 

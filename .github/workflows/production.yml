@@ -31,39 +31,29 @@ jobs:
       - name: Install Salesforce Scanner plugin
         run: sf plugins install @salesforce/sfdx-scanner
 
-      - name: Write Dev Hub JWT key to file
-        run: echo "${{ secrets.DEVHUB_JWT_KEY }}" > devhub.key
-
-      - name: Authenticate Dev Hub via JWT
+      - name: Validate required production secrets
         run: |
-          sf org login jwt \
-            --client-id ${{ secrets.DEVHUB_CLIENT_ID }} \
-            --jwt-key-file devhub.key \
-            --username ${{ secrets.DEVHUB_USERNAME }} \
+          test -n "${{ secrets.DEVHUB_SFDX_URL }}" || { echo "Missing DEVHUB_SFDX_URL"; exit 1; }
+          test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
+
+      - name: Write Dev Hub auth URL to file
+        run: echo "${{ secrets.DEVHUB_SFDX_URL }}" > devhub.sfdx-url
+
+      - name: Authenticate Dev Hub via sfdx-url
+        run: |
+          sf org login sfdx-url \
+            --sfdx-url-file devhub.sfdx-url \
             --set-default-dev-hub \
             --alias devhub
 
-      - name: Write Testing Org JWT key to file
-        run: echo "${{ secrets.TESTORG_JWT_KEY }}" > testorg.key
+      - name: Write Testing Org auth URL to file
+        run: echo "${{ secrets.TESTORG_SFDX_URL }}" > testorg.sfdx-url
 
-      - name: Authenticate Testing Org via JWT
+      - name: Authenticate Testing Org via sfdx-url
         run: |
-          sf org login jwt \
-            --client-id ${{ secrets.TESTORG_CLIENT_ID }} \
-            --jwt-key-file testorg.key \
-            --username ${{ secrets.TESTORG_USERNAME }} \
+          sf org login sfdx-url \
+            --sfdx-url-file testorg.sfdx-url \
             --alias testorg
-
-      - name: Write PBO Org JWT key to file
-        run: echo "${{ secrets.PBOORG_JWT_KEY }}" > pboorg.key
-
-      - name: Authenticate PBO Org via JWT
-        run: |
-          sf org login jwt \
-            --client-id ${{ secrets.PBOORG_CLIENT_ID }} \
-            --jwt-key-file pboorg.key \
-            --username ${{ secrets.PBOORG_USERNAME }} \
-            --alias pboorg
 
       - name: Run quality gates
         uses: ./.github/actions/quality-gates
@@ -79,21 +69,8 @@ jobs:
             --package ${{ steps.ver.outputs.VERSION_ID }} \
             --no-prompt
 
-      - name: Install released package in PBO Org
-        run: |
-          sf package install \
-            --package ${{ steps.ver.outputs.VERSION_ID }} \
-            --target-org pboorg \
-            --installation-key-bypass \
-            --wait 30
-
-      - name: Run smoke test in PBO Org after install
-        run: |
-          sf apex run test \
-            --target-org pboorg \
-            --test-level RunLocalTests \
-            --result-format human \
-            --wait 30
+      - name: Skip PBO deployment until PBO org is available
+        run: echo "PBO deployment and smoke tests are disabled until PBOORG_SFDX_URL is configured."
 
       - name: Create a production Git release tag
         run: |
@@ -103,4 +80,4 @@ jobs:
 
       - name: Clean up key files
         if: always()
-        run: rm -f devhub.key testorg.key pboorg.key
+        run: rm -f devhub.sfdx-url testorg.sfdx-url
