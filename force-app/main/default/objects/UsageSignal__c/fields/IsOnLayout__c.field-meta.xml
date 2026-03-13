@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>IsOnLayout__c</fullName>
+    <defaultValue>false</defaultValue>
+    <label>Is On Layout</label>
+    <type>Checkbox</type>
+</CustomField>

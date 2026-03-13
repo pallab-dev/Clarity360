@@ -1,0 +1,751 @@
+<template>
+    <lightning-card title="Clarity360 Field Usage Optimizer" icon-name="custom:custom63">
+        <template if:false={dashboardLocked}>
+            <div class="toolbar slds-p-horizontal_medium slds-p-bottom_small">
+                <lightning-button variant="brand" label="Run Full Scan" onclick={handleRunFullScan} disabled={fullScanDisabled}></lightning-button>
+                <lightning-button label="Refresh" onclick={refreshAll} disabled={isBusy}></lightning-button>
+            </div>
+            <template if:true={fullScanDisabledReason}>
+                <div class="slds-p-horizontal_medium slds-p-bottom_small">
+                    <div class="status-warning">{fullScanDisabledReason}</div>
+                </div>
+            </template>
+        </template>
+
+        <template if:true={isBusy}>
+            <div class="slds-p-horizontal_medium slds-p-bottom_small">
+                <lightning-spinner size="small" alternative-text="Loading dashboard"></lightning-spinner>
+            </div>
+        </template>
+        <template if:true={hasDataWarning}>
+            <div class="slds-p-horizontal_medium slds-p-bottom_small">
+                <div class="status-warning">{dataWarning}</div>
+            </div>
+        </template>
+        <template if:true={showSetupBanner}>
+            <div class="slds-p-horizontal_medium slds-p-bottom_small">
+                <div class="setup-banner">
+                    <div class="setup-banner-copy">
+                        Setup is not complete. Finish onboarding to unlock dashboard operations and recommendations.
+                    </div>
+                    <lightning-button variant="brand-outline" label="Open Setup Wizard" onclick={handleOpenSetup}></lightning-button>
+                </div>
+            </div>
+        </template>
+        <template if:true={dashboardLocked}>
+            <div class="slds-p-horizontal_medium slds-p-bottom_medium">
+                <div class="locked-banner">
+                    Dashboard is locked until required setup checks are resolved in Setup Wizard.
+                </div>
+            </div>
+        </template>
+        <template if:true={showCompactWarningGuidance}>
+            <div class="slds-p-horizontal_medium slds-p-bottom_small">
+                <div class="warning-guidance-box">
+                    <div class="warning-guidance-head">
+                        <span>Setup Suggestions</span>
+                        <div>
+                            <template if:true={hasRuntimeWarningGuidance}>
+                                <lightning-button
+                                    label="Optimize Setup"
+                                    variant="base"
+                                    onclick={handleOpenConfiguration}
+                                ></lightning-button>
+                            </template>
+                            <template if:true={hasReadinessWarningGuidance}>
+                                <lightning-button
+                                    label="Open Readiness"
+                                    variant="base"
+                                    onclick={handleOpenReadiness}
+                                ></lightning-button>
+                            </template>
+                            <lightning-button
+                                label="Refresh"
+                                variant="base"
+                                onclick={handleRefreshSetupGuidance}
+                                disabled={isSetupGuidanceBusy}
+                            ></lightning-button>
+                        </div>
+                    </div>
+                    <div class="warning-guidance-subtext">
+                        Dashboard is available. These are optional improvements for stronger setup quality.
+                    </div>
+                    <div class="warning-guidance-stack">
+                        <template if:true={hasRuntimeWarningGuidance}>
+                            <div class="warning-guidance-item">
+                                <div class="warning-guidance-item-copy">
+                                    <strong>Setup Configuration:</strong> {runtimeWarningSummary}
+                                </div>
+                            </div>
+                        </template>
+                        <template if:true={hasReadinessWarningGuidance}>
+                            <div class="warning-guidance-item">
+                                <div class="warning-guidance-item-copy">
+                                    <strong>Readiness:</strong> {readinessWarningSummary}
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </template>
+
+        <template if:false={dashboardLocked}>
+            <div class="slds-p-horizontal_medium slds-p-bottom_medium">
+                <lightning-tabset active-tab-value={activeDashboardTab} onactive={handleTabChange}>
+                    <lightning-tab label="Usage" value="usage">
+                        <div class="slds-p-top_small">
+                            <div class={modeBannerClass}>
+                                <div>
+                                    <div class="mode-title">{effectiveModeLabel}</div>
+                                    <div class="mode-subtitle">{modeDescription}</div>
+                                    <template if:true={assistantStatusMessage}>
+                                        <div class="mode-note">{assistantStatusMessage}</div>
+                                    </template>
+                                </div>
+                                <lightning-radio-group
+                                    type="button"
+                                    name="modeSelector"
+                                    options={modeOptions}
+                                    value={currentMode}
+                                    onchange={handleModeChange}
+                                    disabled={modeSelectorDisabled}
+                                ></lightning-radio-group>
+                            </div>
+                        </div>
+                        <template if:true={showAssistantWarning}>
+                            <div class="slds-p-top_small">
+                                <div class="status-warning">
+                                    Agentforce Not Available: {assistantStatusMessage}
+                                </div>
+                            </div>
+                        </template>
+
+                        <div class="summary-grid slds-p-top_medium slds-p-bottom_medium">
+                            <div class="summary-tile">
+                                <div class="summary-label">Cleanliness Score</div>
+                                <div class="summary-value">{summary.cleanlinessScore}%</div>
+                            </div>
+                            <div class="summary-tile">
+                                <div class="summary-label">Active Inventory</div>
+                                <div class="summary-value">{summary.activeInventoryCount}</div>
+                            </div>
+                            <div class="summary-tile">
+                                <div class="summary-label">Usage Signals</div>
+                                <div class="summary-value">{summary.usageSignalCount}</div>
+                            </div>
+                            <div class="summary-tile">
+                                <div class="summary-label">Open Recommendations</div>
+                                <div class="summary-value">{summary.openRecommendationCount}</div>
+                            </div>
+                            <div class="summary-tile">
+                                <div class="summary-label">Latest Job</div>
+                                <div class="summary-value small">{summary.latestJobStatus}</div>
+                            </div>
+                        </div>
+
+                        <div class="inventory-filter-shell slds-p-bottom_medium">
+                            <div class="inventory-filter-head">
+                                <div>
+                                    <div class="inventory-filter-title">Inventory Workspace</div>
+                                    <div class="inventory-filter-subtitle">
+                                        Filter object usage, global components, and metadata usage from one place.
+                                    </div>
+                                </div>
+                                <div class="inventory-filter-caption">
+                                    Missing reason, risk, or usage means the evidence needs another scan cycle.
+                                </div>
+                            </div>
+                            <template if:true={showFocusGuidance}>
+                                <div class="focus-guidance">
+                                    {focusGuidanceMessage}
+                                </div>
+                            </template>
+                            <div class="filters inventory-filters">
+                                <div class="search-shell">
+                                    <lightning-input
+                                        type="search"
+                                        name="searchFilter"
+                                        label="Search"
+                                        value={searchFilter}
+                                        oninput={handleSearchInputChange}
+                                        onkeydown={handleSearchInputKeydown}
+                                        onchange={handleSearchFilterChange}
+                                        placeholder="Search components, reasons, objects, metadata..."
+                                    ></lightning-input>
+                                    <template if:true={hasSearchSuggestions}>
+                                        <div class="search-suggestions">
+                                            <template for:each={searchSuggestions} for:item="row">
+                                                <button
+                                                    key={row.key}
+                                                    type="button"
+                                                    class="search-suggestion-item"
+                                                    data-result-key={row.key}
+                                                    onclick={handleSearchSuggestionClick}
+                                                >
+                                                    <span class="search-suggestion-title">{row.title}</span>
+                                                    <span class="search-suggestion-section">{row.section}</span>
+                                                </button>
+                                            </template>
+                                        </div>
+                                    </template>
+                                </div>
+                                <lightning-combobox
+                                    name="inventoryHealth"
+                                    label="Inventory Health"
+                                    value={inventoryHealthFilter}
+                                    options={inventoryHealthOptions}
+                                    onchange={handleInventoryHealthFilterChange}
+                                ></lightning-combobox>
+                                <lightning-combobox
+                                    name="actionFilter"
+                                    label="Recommendation Action"
+                                    value={actionFilter}
+                                    options={actionOptions}
+                                    onchange={handleActionFilterChange}
+                                ></lightning-combobox>
+                                <lightning-combobox
+                                    name="statusFilter"
+                                    label="Recommendation Status"
+                                    value={statusFilter}
+                                    options={statusOptions}
+                                    onchange={handleStatusFilterChange}
+                                ></lightning-combobox>
+                            </div>
+                        </div>
+
+                        <div class="inventory-stack slds-p-bottom_medium">
+                            <lightning-card title="Object Usage" icon-name="standard:entity">
+                                <div class="section-card-body">
+                                    <template if:true={hasRecommendations}>
+                                        <lightning-accordion
+                                            allow-multiple-sections-open
+                                            active-section-name={expandedRecommendationGroups}
+                                            onsectiontoggle={handleRecommendationGroupToggle}
+                                        >
+                                            <template for:each={recommendationGroups} for:item="group">
+                                                <lightning-accordion-section
+                                                    key={group.name}
+                                                    name={group.name}
+                                                    label={group.label}
+                                                >
+                                                    <div class="recommendation-list">
+                                                        <template for:each={group.rows} for:item="row">
+                                                            <div key={row.id} class={row.rowClass}>
+                                                                <div class="recommendation-grid">
+                                                                    <div>
+                                                                        <div class="recommendation-label">Component</div>
+                                                                        <div class="recommendation-value">{row.componentName}</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div class="recommendation-label">Action</div>
+                                                                        <div class="recommendation-value">{row.action}</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div class="recommendation-label">Priority</div>
+                                                                        <div class="recommendation-value"><span class={row.priorityClass}>{row.priorityLabel}</span></div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div class="recommendation-label">Reason</div>
+                                                                        <div class="recommendation-value">{row.reasonDisplay}</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div class="recommendation-label">Usage</div>
+                                                                        <div class="recommendation-value">{row.usageDisplay}</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div class="recommendation-label">Confidence</div>
+                                                                        <div class="recommendation-value">{row.confidenceDisplay}%</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div class="recommendation-label">Risk</div>
+                                                                        <div class="recommendation-value">{row.riskDisplay}%</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div class="recommendation-label">Status</div>
+                                                                        <div class="recommendation-value">{row.status}</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div class="recommendation-label">Last Evaluated</div>
+                                                                        <div class="recommendation-value">{row.lastEvaluatedDisplay}</div>
+                                                                    </div>
+                                                                    <div class="recommendation-action">
+                                                                        <lightning-button
+                                                                            label="Check Next Step"
+                                                                            variant="base"
+                                                                            data-row-id={row.id}
+                                                                            onclick={handleRecommendationRowAction}
+                                                                        ></lightning-button>
+                                                                    </div>
+                                                                </div>
+                                                                <template if:true={row.showCoverageHint}>
+                                                                    <div class="recommendation-hint">
+                                                                        {row.coverageHint}
+                                                                    </div>
+                                                                </template>
+                                                                <template if:true={row.showEvidenceHint}>
+                                                                    <div class="recommendation-hint">
+                                                                        {row.evidenceHint}
+                                                                    </div>
+                                                                </template>
+                                                            </div>
+                                                        </template>
+                                                    </div>
+                                                </lightning-accordion-section>
+                                            </template>
+                                        </lightning-accordion>
+                                    </template>
+                                    <template if:false={hasRecommendations}>
+                                        <div class="section-empty">
+                                            No object recommendations match the current filters. Run Full Scan, then click Refresh.
+                                        </div>
+                                    </template>
+                                </div>
+                            </lightning-card>
+
+                            <lightning-card title="Global Components" icon-name="utility:layers">
+                                <div class="section-card-body">
+                                    <template if:true={hasGlobalComponents}>
+                                        <div class="global-summary-strip">
+                                            <template for:each={globalSectionSummaryChips} for:item="chip">
+                                                <span key={chip.key} class="metadata-pill">{chip.label}</span>
+                                            </template>
+                                        </div>
+                                        <div class="global-groups-stack">
+                                            <template for:each={globalSectionViewModels} for:item="group">
+                                                <section key={group.name} class="global-group-section">
+                                                    <button
+                                                        type="button"
+                                                        class="global-group-toggle"
+                                                        data-section-name={group.name}
+                                                        onclick={handleToggleGlobalSection}
+                                                    >
+                                                        <lightning-icon
+                                                            icon-name={group.toggleIcon}
+                                                            size="x-small"
+                                                            class="global-group-toggle-icon"
+                                                        ></lightning-icon>
+                                                        <span class="global-group-heading">{group.label}</span>
+                                                    </button>
+                                                    <template if:true={group.isOpen}>
+                                                    <div class="global-component-list">
+                                                        <template for:each={group.rows} for:item="row">
+                                                            <div key={row.key} class={row.itemClass}>
+                                                                <div class="global-component-head">
+                                                                    <div>
+                                                                        <div class="global-component-name">{row.displayName}</div>
+                                                                        <div class="global-component-object">{row.typeCaption}</div>
+                                                                    </div>
+                                                                    <div class={row.statusClass}>{row.status}</div>
+                                                                </div>
+                                                                <div class="global-component-detail">{row.detailDisplay}</div>
+                                                                <div class="global-component-metrics">
+                                                                    <div>
+                                                                        <div class="recommendation-label">Action</div>
+                                                                        <div class="recommendation-value">{row.action}</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div class="recommendation-label">Priority</div>
+                                                                        <div class="recommendation-value"><span class={row.priorityClass}>{row.priorityLabel}</span></div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div class="recommendation-label">Reason</div>
+                                                                        <div class="recommendation-value">{row.reason}</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div class="recommendation-label">Usage</div>
+                                                                        <div class="recommendation-value">{row.usageDisplay}</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div class="recommendation-label">Risk</div>
+                                                                        <div class="recommendation-value">{row.riskDisplay}</div>
+                                                                    </div>
+                                                                    <div>
+                                                                        <div class="recommendation-label">Confidence</div>
+                                                                        <div class="recommendation-value">{row.confidenceDisplay}</div>
+                                                                    </div>
+                                                                    <div class="recommendation-action">
+                                                                        <lightning-button
+                                                                            label="Check Next Step"
+                                                                            variant="base"
+                                                                            data-row-key={row.key}
+                                                                            onclick={handleGlobalRowAction}
+                                                                        ></lightning-button>
+                                                                    </div>
+                                                                </div>
+                                                                <template if:true={row.showEvidenceHint}>
+                                                                    <div class="recommendation-hint">
+                                                                        {row.evidenceHint}
+                                                                    </div>
+                                                                </template>
+                                                                <template if:true={row.showCoverageHint}>
+                                                                    <div class="recommendation-hint">
+                                                                        Coverage is pending. Run Full Scan or Usage Scan again, then refresh this dashboard.
+                                                                    </div>
+                                                                </template>
+                                                            </div>
+                                                        </template>
+                                                    </div>
+                                                    </template>
+                                                </section>
+                                            </template>
+                                        </div>
+                                    </template>
+                                    <template if:false={hasGlobalComponents}>
+                                        <div class="section-empty">
+                                            Global component inventory is currently hidden by filters or unavailable in the latest payload.
+                                        </div>
+                                    </template>
+                                </div>
+                            </lightning-card>
+
+                            <template if:true={hasMetadataSection}>
+                                <lightning-card>
+                                    <div slot="title" class="section-title-with-icon">
+                                        <span class="section-title-logo metadata-section-logo"></span>
+                                        <span>Metadata Usage</span>
+                                    </div>
+                                    <div class="section-card-body">
+                                        <lightning-accordion
+                                            allow-multiple-sections-open
+                                            active-section-name={expandedMetadataGroups}
+                                            onsectiontoggle={handleMetadataGroupToggle}
+                                        >
+                                            <template for:each={metadataGroups} for:item="group">
+                                                <lightning-accordion-section
+                                                    key={group.name}
+                                                    name={group.name}
+                                                    label={group.label}
+                                                >
+                                                    <div class="metadata-group-list">
+                                                        <template for:each={group.rows} for:item="row">
+                                                            <div key={row.id} class="metadata-group-item">
+                                                                <div class="metadata-group-head">
+                                                                    <div class="metadata-group-title-wrap">
+                                                                        <span class="metadata-group-logo"></span>
+                                                                        <div class="metadata-group-title">{row.displayTitle}</div>
+                                                                    </div>
+                                                                    <div class="metadata-group-api">{row.apiName}</div>
+                                                                </div>
+                                                                <div class="metadata-pill-row">
+                                                                    <span class={row.priorityClass}>{row.priorityLabel}</span>
+                                                                    <span class="metadata-pill">References {row.referenceCount}</span>
+                                                                    <span class="metadata-pill">Subscribers {row.activeSubscriberCount}</span>
+                                                                    <span class="metadata-pill">{row.monitoringEligibleLabel}</span>
+                                                                    <span class="metadata-pill">Scanned {row.lastScannedDisplay}</span>
+                                                                </div>
+                                                                <div class="metadata-group-summary">{row.whyVisible}</div>
+                                                                <div class="metadata-group-summary">Next: {row.nextStep}</div>
+                                                            </div>
+                                                        </template>
+                                                    </div>
+                                                </lightning-accordion-section>
+                                            </template>
+                                        </lightning-accordion>
+                                    </div>
+                                </lightning-card>
+                            </template>
+                        </div>
+
+                        <lightning-card title="Recent Jobs" icon-name="utility:sync">
+                            <div class="slds-p-horizontal_small slds-p-bottom_small">
+                                <lightning-datatable
+                                    key-field="Id"
+                                    data={jobs}
+                                    columns={jobColumns}
+                                    hide-checkbox-column
+                                ></lightning-datatable>
+                                <div class="jobs-pagination">
+                                    <lightning-button
+                                        label="Previous"
+                                        onclick={handlePreviousJobsPage}
+                                        disabled={previousJobsDisabled}
+                                    ></lightning-button>
+                                    <span class="jobs-page-label">{jobsPageLabel}</span>
+                                    <lightning-button
+                                        label="Next"
+                                        onclick={handleNextJobsPage}
+                                        disabled={nextJobsDisabled}
+                                    ></lightning-button>
+                                </div>
+                            </div>
+                        </lightning-card>
+                    </lightning-tab>
+
+                    <lightning-tab label="Monitoring" value="monitoring">
+                        <div class="monitoring-shell slds-p-top_small">
+                            <div class="monitoring-hero">
+                                <div class="monitoring-donut-card">
+                                    <div class="monitoring-donut" style={asyncUsageStyle}>
+                                        <div class="monitoring-donut-center">{asyncUsageLabel}</div>
+                                    </div>
+                                    <div class="monitoring-donut-label">Daily Async Apex</div>
+                                </div>
+                                <div class="monitoring-summary-grid">
+                                    <div class="summary-tile">
+                                        <div class="summary-label">Queueable Active</div>
+                                        <div class="summary-value">{monitoringSnapshot.queueableActiveCount}</div>
+                                    </div>
+                                    <div class="summary-tile">
+                                        <div class="summary-label">Batch Active</div>
+                                        <div class="summary-value">{monitoringSnapshot.batchActiveCount}</div>
+                                    </div>
+                                    <div class="summary-tile">
+                                        <div class="summary-label">Scheduled Jobs</div>
+                                        <div class="summary-value">{monitoringSnapshot.scheduledJobCount}</div>
+                                    </div>
+                                    <div class="summary-tile">
+                                        <div class="summary-label">Platform Events</div>
+                                        <div class="summary-value">{monitoringSnapshot.platformEventCount}</div>
+                                    </div>
+                                    <div class="summary-tile">
+                                        <div class="summary-label">Event Subscribers</div>
+                                        <div class="summary-value">{monitoringSnapshot.activePlatformSubscriberCount}</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <lightning-card title="Governor Limits" icon-name="utility:metrics">
+                                <div class="monitoring-table-wrap">
+                                    <table class="monitoring-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Metric</th>
+                                                <th>Used</th>
+                                                <th>Limit</th>
+                                                <th>Remaining</th>
+                                                <th>% Used</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <template for:each={monitoringLimitMetrics} for:item="metric">
+                                                <tr key={metric.key}>
+                                                    <td>{metric.label}</td>
+                                                    <td>{metric.usedValue}</td>
+                                                    <td>{metric.limitValue}</td>
+                                                    <td>{metric.remainingValue}</td>
+                                                    <td>{metric.pctUsed}%</td>
+                                                </tr>
+                                            </template>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </lightning-card>
+
+                            <div class="slds-p-top_medium">
+                                <lightning-card title="Platform Event Monitoring" icon-name="utility:event">
+                                    <div class="monitoring-table-wrap">
+                                        <template if:true={hasPlatformEvents}>
+                                            <table class="monitoring-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Event</th>
+                                                        <th>Subscribers</th>
+                                                        <th>References</th>
+                                                        <th>Last Scanned</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <template for:each={platformEventRows} for:item="row">
+                                                        <tr key={row.id}>
+                                                            <td>{row.displayName}</td>
+                                                            <td>{row.activeSubscriberCount}</td>
+                                                            <td>{row.referenceCount}</td>
+                                                            <td>{row.lastScannedOn}</td>
+                                                        </tr>
+                                                    </template>
+                                                </tbody>
+                                            </table>
+                                        </template>
+                                        <template if:false={hasPlatformEvents}>
+                                            <div class="slds-text-color_weak slds-p-vertical_small">
+                                                Platform event monitoring data will appear after metadata inventory includes event components.
+                                            </div>
+                                        </template>
+                                    </div>
+                                </lightning-card>
+                            </div>
+                        </div>
+                    </lightning-tab>
+                </lightning-tabset>
+            </div>
+        </template>
+    </lightning-card>
+
+    <template if:true={isSearchModalOpen}>
+        <section role="dialog" tabindex="-1" aria-modal="true" class="slds-modal slds-fade-in-open">
+            <div class="slds-modal__container">
+                <header class="slds-modal__header">
+                    <lightning-button-icon
+                        icon-name="utility:close"
+                        variant="bare-inverse"
+                        alternative-text="Close"
+                        title="Close"
+                        onclick={handleCloseSearchModal}
+                        class="slds-modal__close"
+                    ></lightning-button-icon>
+                    <h2 class="slds-text-heading_medium">{searchResultsTitle}</h2>
+                </header>
+                <div class="slds-modal__content slds-p-around_medium search-results-modal">
+                    <template if:true={hasSearchResults}>
+                        <div class="search-results-list">
+                            <template for:each={searchResults} for:item="row">
+                                <button
+                                    key={row.key}
+                                    type="button"
+                                    class="search-result-card"
+                                    data-result-key={row.key}
+                                    onclick={handleSearchResultClick}
+                                >
+                                    <div class="search-result-head">
+                                        <div>
+                                            <div class="search-result-title">{row.title}</div>
+                                            <div class="search-result-section">{row.section}</div>
+                                        </div>
+                                        <span class={row.priorityClass}>{row.priorityLabel}</span>
+                                    </div>
+                                    <div class="search-result-summary">{row.summary}</div>
+                                    <div class="search-result-guidance">{row.hiddenReason}</div>
+                                </button>
+                            </template>
+                        </div>
+                    </template>
+                    <template if:false={hasSearchResults}>
+                        <div class="section-empty">
+                            No monitored items match this search yet. Try a field API name, object name, metadata API name, or automation name.
+                        </div>
+                    </template>
+                </div>
+                <footer class="slds-modal__footer">
+                    <lightning-button label="Close" onclick={handleCloseSearchModal}></lightning-button>
+                </footer>
+            </div>
+        </section>
+        <div class="slds-backdrop slds-backdrop_open"></div>
+    </template>
+
+    <template if:true={isUsageModalOpen}>
+        <section role="dialog" tabindex="-1" aria-modal="true" class="slds-modal slds-fade-in-open">
+            <div class="slds-modal__container">
+                <header class="slds-modal__header">
+                    <lightning-button-icon
+                        icon-name="utility:close"
+                        variant="bare-inverse"
+                        alternative-text="Close"
+                        title="Close"
+                        onclick={handleCloseUsageModal}
+                        class="slds-modal__close"
+                    ></lightning-button-icon>
+                    <h2 class="slds-text-heading_medium">Recommended Next Steps</h2>
+                </header>
+                <div class="slds-modal__content slds-p-around_medium dependency-modal">
+                    <div class="next-step-hero">
+                        <div>
+                            <div class="next-step-title">{selectedUsage.title}</div>
+                            <div class="next-step-subtitle">{selectedUsage.sectionLabel}</div>
+                        </div>
+                        <div class="next-step-chip">{selectedUsage.actionLabel}</div>
+                    </div>
+                    <p class="next-step-summary">{selectedUsage.summary}</p>
+                    <div class="next-step-metrics">
+                        <div class="next-step-metric">
+                            <div class="recommendation-label">Risk</div>
+                            <div class="recommendation-value">{selectedUsage.riskDisplay}</div>
+                        </div>
+                        <div class="next-step-metric">
+                            <div class="recommendation-label">Confidence</div>
+                            <div class="recommendation-value">{selectedUsage.confidenceDisplay}</div>
+                        </div>
+                        <div class="next-step-metric">
+                            <div class="recommendation-label">Usage</div>
+                            <div class="recommendation-value">{selectedUsage.usageDisplay}</div>
+                        </div>
+                        <div class="next-step-metric">
+                            <div class="recommendation-label">Field Key</div>
+                            <div class="recommendation-value">{selectedUsage.fieldKey}</div>
+                        </div>
+                    </div>
+                    <div class="next-step-list">
+                        <template for:each={selectedUsage.nextSteps} for:item="step">
+                            <div key={step.key} class="next-step-list-item">{step.text}</div>
+                        </template>
+                    </div>
+                    <div class="next-step-supporting">
+                        <p><strong>Active Triggers:</strong> {selectedUsage.activeTriggerRefs}</p>
+                        <p><strong>Active Validation Rules:</strong> {selectedUsage.activeValidationRuleRefs}</p>
+                        <p><strong>Active Flows:</strong> {selectedUsage.activeFlowRefs}</p>
+                        <p><strong>Apex Classes:</strong> {selectedUsage.apexClassRefs}</p>
+                        <p><strong>Sample Size:</strong> {selectedUsage.sampleSize}</p>
+                        <p><strong>Non Null Count:</strong> {selectedUsage.nonNullCount}</p>
+                        <p><strong>Has Data:</strong> {selectedUsage.hasData}</p>
+                    </div>
+                    <p class="dependency-guidance">{selectedUsage.deleteGuidance}</p>
+                </div>
+                <footer class="slds-modal__footer">
+                    <template if:true={selectedUsage.showDeleteAction}>
+                        <lightning-button
+                            variant="destructive"
+                            label="Delete Field"
+                            onclick={handleDeleteField}
+                            disabled={deleteFieldDisabled}
+                        ></lightning-button>
+                    </template>
+                    <lightning-button label="Close" onclick={handleCloseUsageModal}></lightning-button>
+                </footer>
+            </div>
+        </section>
+        <div class="slds-backdrop slds-backdrop_open"></div>
+    </template>
+
+    <template if:true={showChatLauncher}>
+        <div class="chat-launcher-shell">
+            <template if:true={isChatOpen}>
+                <section class="chat-window" aria-label="Clarity360 AI Chat">
+                    <header class="chat-header">
+                        <span>Clarity360 AI Assistant</span>
+                        <lightning-button-icon
+                            icon-name="utility:close"
+                            alternative-text="Close chat"
+                            variant="bare-inverse"
+                            onclick={toggleChatWindow}
+                        ></lightning-button-icon>
+                    </header>
+                    <div class="chat-body">
+                        <template for:each={chatMessages} for:item="message">
+                            <div key={message.id} class={message.bubbleClass}>
+                                {message.text}
+                            </div>
+                        </template>
+                        <template if:true={isChatBusy}>
+                            <div class="chat-bubble assistant">Working on it...</div>
+                        </template>
+                    </div>
+                    <div class="chat-input-row">
+                        <lightning-input
+                            variant="label-hidden"
+                            label="Ask a question"
+                            placeholder="Ask in simple English..."
+                            value={chatInput}
+                            onchange={handleChatInputChange}
+                            onkeydown={handleChatInputKeydown}
+                        ></lightning-input>
+                        <lightning-button
+                            variant="brand"
+                            label="Send"
+                            onclick={handleSendChat}
+                            disabled={sendDisabled}
+                        ></lightning-button>
+                    </div>
+                </section>
+            </template>
+            <lightning-button-icon
+                class="chat-launcher-btn"
+                icon-name="utility:einstein"
+                alternative-text="Open AI chat"
+                title="Open AI chat"
+                variant="brand"
+                onclick={toggleChatWindow}
+            ></lightning-button-icon>
+        </div>
+    </template>
+</template>

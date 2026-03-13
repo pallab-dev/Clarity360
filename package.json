@@ -1,0 +1,13 @@
+{
+  "name": "clarity360",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "lint": "eslint ./force-app/**/*.js",
+    "lint:fix": "eslint ./force-app/**/*.js --fix"
+  },
+  "devDependencies": {
+    "@salesforce/eslint-config-lwc": "latest",
+    "eslint": "latest"
+  }
+}

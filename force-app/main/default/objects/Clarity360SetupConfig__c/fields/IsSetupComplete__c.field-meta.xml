@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>IsSetupComplete__c</fullName>
+    <defaultValue>false</defaultValue>
+    <description>Marks whether initial setup has been completed.</description>
+    <externalId>false</externalId>
+    <inlineHelpText>If true, setup wizard is completed for this org.</inlineHelpText>
+    <label>Is Setup Complete</label>
+    <trackTrending>false</trackTrending>
+    <type>Checkbox</type>
+</CustomField>

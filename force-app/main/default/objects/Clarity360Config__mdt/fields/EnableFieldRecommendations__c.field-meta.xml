@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>EnableFieldRecommendations__c</fullName>
+    <defaultValue>true</defaultValue>
+    <description>Enable recommendations derived from field usage and null-rate signals.</description>
+    <label>Enable Field Recommendations</label>
+    <type>Checkbox</type>
+</CustomField>

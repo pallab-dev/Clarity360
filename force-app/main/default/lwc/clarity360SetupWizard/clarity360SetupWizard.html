@@ -1,0 +1,186 @@
+<template>
+    <lightning-card title="Clarity360 Setup Wizard" icon-name="utility:setup">
+        <div class="wizard-shell slds-p-horizontal_medium slds-p-bottom_medium">
+            <lightning-progress-indicator current-step={currentStepValue} type="path" variant="base">
+                <lightning-progress-step label="Welcome" value="1"></lightning-progress-step>
+                <lightning-progress-step label="Readiness" value="2"></lightning-progress-step>
+                <lightning-progress-step label="Configuration" value="3"></lightning-progress-step>
+                <lightning-progress-step label="Initial Run" value="4"></lightning-progress-step>
+            </lightning-progress-indicator>
+        </div>
+
+        <template if:true={isBusy}>
+            <div class="slds-p-horizontal_medium slds-p-bottom_small">
+                <lightning-spinner size="small" alternative-text="Loading setup wizard"></lightning-spinner>
+            </div>
+        </template>
+
+        <div class="slds-p-horizontal_medium slds-p-bottom_medium">
+            <template if:true={isStepWelcome}>
+                <div class="panel">
+                    <h2 class="slds-text-heading_small slds-m-bottom_x-small">Welcome to Clarity360</h2>
+                    <p>Setup will validate org readiness, save runtime configuration, and optionally start your initial scans.</p>
+                    <p class="slds-m-top_x-small">Estimated time: 5-10 minutes.</p>
+                </div>
+            </template>
+
+            <template if:true={isStepReadiness}>
+                <div class="panel">
+                    <h2 class="slds-text-heading_small slds-m-bottom_x-small">Org Readiness Checks</h2>
+                    <p class="slds-m-bottom_small">Overall status: <strong>{readinessStatus}</strong></p>
+                    <p class="slds-m-bottom_small">{readinessSummaryLabel}</p>
+                    <template if:true={hasBlockedReadiness}>
+                        <p class="slds-text-color_error slds-m-bottom_small">
+                            Required checks are blocked. Resolve the remediation guidance below to continue.
+                        </p>
+                    </template>
+                    <template for:each={readinessGroups} for:item="group">
+                        <section key={group.key} class={group.sectionClass}>
+                            <button class="group-toggle" type="button" data-group={group.key} onclick={handleToggleGroup}>
+                                <lightning-icon icon-name={group.iconName} size="x-small" class="group-icon"></lightning-icon>
+                                <span class="group-title">{group.label}</span>
+                                <span class="group-summary">{group.summary}</span>
+                                <span class="status-pill">{group.status}</span>
+                            </button>
+                            <template if:true={group.expanded}>
+                                <div class="group-body">
+                                    <template for:each={group.checks} for:item="item">
+                                        <div key={item.key} class={item.rowClass}>
+                                            <div class="check-head">
+                                                <span>{item.label}</span>
+                                                <span class="status-pill">{item.status}</span>
+                                            </div>
+                                            <div>{item.message}</div>
+                                            <div class="muted">{item.remediation}</div>
+                                        </div>
+                                    </template>
+                                </div>
+                            </template>
+                        </section>
+                    </template>
+                    <div class="slds-m-top_small">
+                        <lightning-button label="Run Checks Again" onclick={handleRunReadiness}></lightning-button>
+                    </div>
+                </div>
+            </template>
+
+            <template if:true={isStepConfig}>
+                <div class="panel form-grid">
+                    <div class="setup-choice-card">
+                        <h3 class="slds-text-title_bold">1. Standard Objects</h3>
+                        <p class="slds-m-top_x-small">{scopeHelpText}</p>
+                        <lightning-input
+                            class="slds-m-top_small"
+                            type="toggle"
+                            label="Include Standard Objects"
+                            message-toggle-active="Included"
+                            message-toggle-inactive="Custom objects only"
+                            checked={includeStandardObjects}
+                            data-field="includeStandardObjects"
+                            onchange={handleIncludeStandardObjectsChange}
+                        ></lightning-input>
+                    </div>
+
+                    <div class="setup-choice-card">
+                        <h3 class="slds-text-title_bold">2. Recommendation Sensitivity</h3>
+                        <p class="slds-m-top_x-small">{coverageHelpText}</p>
+                        <lightning-input
+                            class="slds-m-top_small"
+                            type="number"
+                            label="Coverage Threshold (%)"
+                            value={coverageThreshold}
+                            data-field="coverageThreshold"
+                            min="0"
+                            max="100"
+                            onchange={handleCoverageThresholdChange}
+                        ></lightning-input>
+                    </div>
+
+                    <div class="setup-choice-card setup-choice-card-advanced">
+                        <div class="advanced-head">
+                            <div>
+                                <h3 class="slds-text-title_bold">Advanced Options</h3>
+                                <p class="slds-m-top_x-small">Optional controls for exclusions and automation.</p>
+                            </div>
+                            <lightning-button
+                                label={advancedToggleLabel}
+                                variant="base"
+                                onclick={handleToggleAdvanced}
+                            ></lightning-button>
+                        </div>
+
+                        <template if:true={showAdvancedOptions}>
+                            <div class="advanced-grid slds-m-top_small">
+                                <lightning-textarea
+                                    label="Excluded Objects"
+                                    value={excludedObjects}
+                                    data-field="excludedObjects"
+                                    onchange={handleExcludedObjectsChange}
+                                ></lightning-textarea>
+                                <lightning-textarea
+                                    label="Excluded Namespaces"
+                                    value={excludedNamespaces}
+                                    data-field="excludedNamespaces"
+                                    onchange={handleExcludedNamespacesChange}
+                                ></lightning-textarea>
+                                <lightning-input
+                                    type="checkbox"
+                                    label="Use Named Credential"
+                                    checked={useNamedCredential}
+                                    data-field="useNamedCredential"
+                                    onchange={handleUseNamedCredentialChange}
+                                ></lightning-input>
+                                <lightning-input
+                                    type="checkbox"
+                                    label="Enable Scheduled Scan"
+                                    checked={enableScheduledScan}
+                                    data-field="enableScheduledScan"
+                                    onchange={handleEnableScheduledScanChange}
+                                ></lightning-input>
+                                <template if:true={showScheduleControls}>
+                                    <lightning-combobox
+                                        label="Schedule Frequency"
+                                        value={scheduleFrequency}
+                                        options={scheduleOptions}
+                                        data-field="scheduleFrequency"
+                                        placeholder="Choose a frequency"
+                                        disabled={isScheduleFrequencyDisabled}
+                                        onchange={handleScheduleFrequencyChange}
+                                    ></lightning-combobox>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+                <p class="slds-m-top_small slds-text-body_small">
+                    Pick the main scan behavior here. If you leave something blank, Clarity360 can use the org default and you can optimize it later.
+                </p>
+                <p class="slds-m-top_small slds-text-body_small slds-text-color_weak">
+                    Scan capacity, sample volume, and other engine guardrails are developer-managed. Setup only captures subscriber scope and behavior preferences.
+                </p>
+            </template>
+
+            <template if:true={isStepInitialRun}>
+                <div class="panel">
+                    <lightning-input
+                        type="checkbox"
+                        label="Also run usage scan after inventory"
+                        checked={runUsageScan}
+                        onchange={handleRunUsageChange}
+                    ></lightning-input>
+                    <div class="slds-m-top_small">
+                        <lightning-button variant="brand" label="Start Initial Run" onclick={handleStartInitialRun}></lightning-button>
+                    </div>
+                    <template if:true={initialRunMessage}>
+                        <p class="slds-m-top_small">{initialRunMessage}</p>
+                    </template>
+                </div>
+            </template>
+        </div>
+
+        <div class="wizard-footer slds-p-horizontal_medium slds-p-bottom_medium">
+            <lightning-button label="Back" onclick={handleBack} disabled={disableBack}></lightning-button>
+            <lightning-button variant="brand" label={nextLabel} onclick={handleNext} disabled={disableNext}></lightning-button>
+        </div>
+    </lightning-card>
+</template>

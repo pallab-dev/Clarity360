@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>EnableValidationRuleScan__c</fullName>
+    <defaultValue>true</defaultValue>
+    <description>Enable global validation rule status recommendations.</description>
+    <label>Enable Validation Rule Scan</label>
+    <type>Checkbox</type>
+</CustomField>

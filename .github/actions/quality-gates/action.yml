@@ -1,0 +1,63 @@
+name: 'Salesforce Quality Gates'
+description: 'PMD, ESLint, SF Scanner, Apex tests'
+runs:
+  using: composite
+  steps:
+    - name: Gate 1: PMD scan
+      shell: bash
+      run: |
+        sf scanner run \
+          --target "./force-app/**/*.cls,./force-app/**/*.trigger" \
+          --engine pmd \
+          --severity-threshold 2 \
+          --format csv \
+          --outfile pmd-results.csv
+
+    - name: Gate 2: ESLint
+      shell: bash
+      run: npm run lint
+
+    - name: Gate 3: SF Scanner security category
+      shell: bash
+      run: |
+        sf scanner run \
+          --target "./force-app" \
+          --category "Security" \
+          --severity-threshold 1 \
+          --format csv \
+          --outfile scanner-security-results.csv
+
+    - name: Gate 4: Apex tests on testorg
+      shell: bash
+      run: |
+        sf apex run test \
+          --target-org testorg \
+          --test-level RunLocalTests \
+          --code-coverage \
+          --result-format human \
+          --wait 30 | tee apex-test-results.txt
+        COVERAGE=$(awk '/Org Wide Coverage/ {gsub(/[^0-9]/, "", $NF); print $NF}' apex-test-results.txt | tail -n 1)
+        if [ -z "$COVERAGE" ]; then
+          echo "Unable to determine org-wide Apex coverage from test output."
+          exit 1
+        fi
+        if [ "$COVERAGE" -lt 75 ]; then
+          echo "Org-wide Apex coverage is below 75%: ${COVERAGE}%"
+          exit 1
+        fi
+
+    - name: Upload PMD results on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: pmd-results
+        path: pmd-results.csv
+        if-no-files-found: ignore
+
+    - name: Upload scanner security results on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: scanner-security-results
+        path: scanner-security-results.csv
+        if-no-files-found: ignore

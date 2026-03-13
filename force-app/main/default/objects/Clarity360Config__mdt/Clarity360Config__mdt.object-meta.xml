@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomObject xmlns="http://soap.sforce.com/2006/04/metadata">
+    <description>Runtime switches and thresholds for Clarity360 scanners.</description>
+    <label>Clarity360 Config</label>
+    <pluralLabel>Clarity360 Configs</pluralLabel>
+    <visibility>Public</visibility>
+</CustomObject>

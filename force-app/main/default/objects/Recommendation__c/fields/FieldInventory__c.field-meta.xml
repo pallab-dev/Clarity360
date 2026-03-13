@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>FieldInventory__c</fullName>
+    <label>Field Inventory</label>
+    <referenceTo>FieldInventory__c</referenceTo>
+    <relationshipName>Recommendations</relationshipName>
+    <type>Lookup</type>
+</CustomField>

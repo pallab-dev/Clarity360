@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomTab xmlns="http://soap.sforce.com/2006/04/metadata">
+    <description>Guided setup wizard for Clarity360 onboarding.</description>
+    <label>Clarity360 Setup</label>
+    <lwcComponent>clarity360SetupWizard</lwcComponent>
+    <motif>Custom57: Building Block</motif>
+</CustomTab>
