@@ -172,6 +172,55 @@ jobs:
           path: scanner-security-results.csv
           if-no-files-found: ignore
 
+  xml-validation:
+    name: XML Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate XML files
+        run: find force-app manifest -type f -name '*.xml' -print0 | xargs -0 xmllint --noout
+
+  metadata-validation:
+    name: Metadata Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Salesforce CLI
+        run: npm install -g @salesforce/cli
+
+      - name: Validate required test org secret
+        run: test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
+
+      - name: Write Testing Org auth URL to file
+        run: echo "${{ secrets.TESTORG_SFDX_URL }}" > testorg.sfdx-url
+
+      - name: Authenticate Testing Org via sfdx-url
+        run: |
+          sf org login sfdx-url \
+            --sfdx-url-file testorg.sfdx-url \
+            --alias testorg
+
+      - name: Validate metadata deployment to Testing Org
+        run: |
+          sf project deploy start \
+            --target-org testorg \
+            --source-dir force-app/main/default \
+            --ignore-conflicts \
+            --dry-run \
+            --wait 30
+
+      - name: Clean up auth file
+        if: always()
+        run: rm -f testorg.sfdx-url
+
   apex-tests:
     name: Apex Tests
     runs-on: ubuntu-latest
@@ -272,52 +321,64 @@ jobs:
         if: always()
         run: rm -f testorg.sfdx-url
 
-  release-package:
-    name: Build And Deploy Beta
+  appexchange-report:
+    name: AppExchange Report
     runs-on: ubuntu-latest
-    needs:
-      - prepare-changes
-      - pmd-scan
-      - eslint-scan
-      - security-scan
-      - apex-tests
-    permissions:
-      contents: write
-    env:
-      DEVHUB_SFDX_URL: ${{ secrets.DEVHUB_SFDX_URL }}
-      TESTORG_SFDX_URL: ${{ secrets.TESTORG_SFDX_URL }}
-      PACKAGE_ID: ${{ secrets.PACKAGE_ID }}
+    continue-on-error: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Install Node.js 18
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
+      - name: Install Salesforce CLI
+        run: npm install -g @salesforce/cli
 
-      - name: Install npm dependencies
-        run: npm ci
+      - name: Install Salesforce Code Analyzer v5
+        run: sf plugins install code-analyzer
+
+      - name: Generate AppExchange security review report
+        run: |
+          sf code-analyzer run \
+            --rule-selector AppExchange \
+            --rule-selector Recommended:Security \
+            --output-file CodeAnalyzer.html
+
+      - name: Upload AppExchange report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: appexchange-code-analyzer-report
+          path: CodeAnalyzer.html
+          if-no-files-found: ignore
+
+  deploy-testorg:
+    name: Deploy To Testing Org
+    runs-on: ubuntu-latest
+    needs:
+      - prepare-changes
+      - pmd-scan
+      - eslint-scan
+      - security-scan
+      - xml-validation
+      - metadata-validation
+      - apex-tests
+      - appexchange-report
+    permissions:
+      contents: write
+    env:
+      TESTORG_SFDX_URL: ${{ secrets.TESTORG_SFDX_URL }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Salesforce CLI
         run: npm install -g @salesforce/cli
 
-      - name: Validate package deployment secrets
-        run: |
-          test -n "$DEVHUB_SFDX_URL" || { echo "Missing DEVHUB_SFDX_URL"; exit 1; }
-          test -n "$TESTORG_SFDX_URL" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
-
-      - name: Write Dev Hub auth URL to file
-        run: echo "$DEVHUB_SFDX_URL" > devhub.sfdx-url
-
-      - name: Authenticate Dev Hub via sfdx-url
-        run: |
-          sf org login sfdx-url \
-            --sfdx-url-file devhub.sfdx-url \
-            --set-default-dev-hub \
-            --alias devhub
+      - name: Validate required test org secret
+        run: test -n "$TESTORG_SFDX_URL" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
 
       - name: Write Testing Org auth URL to file
         run: echo "$TESTORG_SFDX_URL" > testorg.sfdx-url
@@ -328,29 +389,16 @@ jobs:
             --sfdx-url-file testorg.sfdx-url \
             --alias testorg
 
-      - name: Build beta package version
-        id: pkg
-        if: ${{ env.PACKAGE_ID != '' }}
+      - name: Deploy source to Testing Org
         run: |
-          RESULT=$(sf package version create \
-            --package "$PACKAGE_ID" \
-            --installation-key-bypass \
-            --code-coverage \
-            --wait 30 \
-            --json)
-          echo "VERSION_ID=$(echo "$RESULT" | jq -r '.result.SubscriberPackageVersionId')" >> "$GITHUB_OUTPUT"
-
-      - name: Install beta package in Testing Org
-        if: ${{ steps.pkg.outputs.VERSION_ID != '' }}
-        run: |
-          sf package install \
-            --package ${{ steps.pkg.outputs.VERSION_ID }} \
+          sf project deploy start \
             --target-org testorg \
-            --installation-key-bypass \
-            --wait 30
+            --source-dir force-app/main/default \
+            --ignore-conflicts \
+            --wait 30 \
+            --concise
 
-      - name: Run full test suite in Testing Org after install
-        if: ${{ steps.pkg.outputs.VERSION_ID != '' }}
+      - name: Run post-deploy Apex tests in Testing Org
         run: |
           sf apex run test \
             --target-org testorg \
@@ -359,30 +407,9 @@ jobs:
             --result-format human \
             --wait 30
 
-      - name: Save version ID to .version-id file and commit
-        if: ${{ steps.pkg.outputs.VERSION_ID != '' }}
-        run: |
-          echo "${{ steps.pkg.outputs.VERSION_ID }}" > .version-id
-          git config user.email "ci-bot@yourdomain.com"
-          git config user.name "CI Bot"
-          git add .version-id
-          git commit -m "chore: update beta version ID [skip ci]" || echo "No changes to commit"
-          git push
-
-      - name: Create a Git tag for this beta
-        if: ${{ steps.pkg.outputs.VERSION_ID != '' }}
-        run: |
-          TAG="beta-${{ github.ref_name }}-$(date +%Y%m%d%H%M%S)"
-          git tag "$TAG"
-          git push origin "$TAG"
-
-      - name: Skip package build until PACKAGE_ID is configured
-        if: ${{ env.PACKAGE_ID == '' }}
-        run: echo "PACKAGE_ID is not configured. Package build, install, version persistence, and beta tagging are skipped."
-
-      - name: Clean up auth files
+      - name: Clean up auth file
         if: always()
-        run: rm -f devhub.sfdx-url testorg.sfdx-url
+        run: rm -f testorg.sfdx-url
 
   release-pipeline:
     name: release-pipeline
@@ -392,8 +419,11 @@ jobs:
       - pmd-scan
       - eslint-scan
       - security-scan
+      - xml-validation
+      - metadata-validation
       - apex-tests
-      - release-package
+      - appexchange-report
+      - deploy-testorg
     steps:
       - name: Mark release pipeline successful
         run: echo "Release pipeline completed successfully."

@@ -172,6 +172,55 @@ jobs:
           path: scanner-security-results.csv
           if-no-files-found: ignore
 
+  xml-validation:
+    name: XML Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate XML files
+        run: find force-app manifest -type f -name '*.xml' -print0 | xargs -0 xmllint --noout
+
+  metadata-validation:
+    name: Metadata Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Salesforce CLI
+        run: npm install -g @salesforce/cli
+
+      - name: Validate required test org secret
+        run: test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
+
+      - name: Write Testing Org auth URL to file
+        run: echo "${{ secrets.TESTORG_SFDX_URL }}" > testorg.sfdx-url
+
+      - name: Authenticate Testing Org via sfdx-url
+        run: |
+          sf org login sfdx-url \
+            --sfdx-url-file testorg.sfdx-url \
+            --alias testorg
+
+      - name: Validate metadata deployment to Testing Org
+        run: |
+          sf project deploy start \
+            --target-org testorg \
+            --source-dir force-app/main/default \
+            --ignore-conflicts \
+            --dry-run \
+            --wait 30
+
+      - name: Clean up auth file
+        if: always()
+        run: rm -f testorg.sfdx-url
+
   apex-tests:
     name: Apex Tests
     runs-on: ubuntu-latest
@@ -272,6 +321,37 @@ jobs:
         if: always()
         run: rm -f testorg.sfdx-url
 
+  appexchange-report:
+    name: AppExchange Report
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Salesforce CLI
+        run: npm install -g @salesforce/cli
+
+      - name: Install Salesforce Code Analyzer v5
+        run: sf plugins install code-analyzer
+
+      - name: Generate AppExchange security review report
+        run: |
+          sf code-analyzer run \
+            --rule-selector AppExchange \
+            --rule-selector Recommended:Security \
+            --output-file CodeAnalyzer.html
+
+      - name: Upload AppExchange report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: appexchange-code-analyzer-report
+          path: CodeAnalyzer.html
+          if-no-files-found: ignore
+
   promote-package:
     name: Promote And Tag Release
     runs-on: ubuntu-latest
@@ -280,7 +360,10 @@ jobs:
       - pmd-scan
       - eslint-scan
       - security-scan
+      - xml-validation
+      - metadata-validation
       - apex-tests
+      - appexchange-report
     permissions:
       contents: write
     env:
@@ -349,7 +432,10 @@ jobs:
       - pmd-scan
       - eslint-scan
       - security-scan
+      - xml-validation
+      - metadata-validation
       - apex-tests
+      - appexchange-report
       - promote-package
     steps:
       - name: Mark production pipeline successful

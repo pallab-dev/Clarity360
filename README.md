@@ -79,8 +79,8 @@ Add these secrets in GitHub Settings -> Secrets -> Actions.
 | `DEVHUB_SFDX_URL` | SFDX auth URL for the Dev Hub org used by `sf org login sfdx-url` |
 | `TESTORG_SFDX_URL` | SFDX auth URL for the Testing Org used by `sf org login sfdx-url` |
 | `PBOORG_SFDX_URL` | Optional for now. Add this when the PBO Org is available to enable production installation and smoke tests. |
-| `PACKAGE_NAME` | Exact package name as registered in the Dev Hub. Optional until package creation is enabled. |
-| `PACKAGE_ID` | `0Ho` package ID from the Dev Hub. Optional for release pipeline smoke validation, required once package version creation is enabled. |
+| `PACKAGE_NAME` | Exact package name as registered in the Dev Hub. Required for production packaging and AppExchange release operations. |
+| `PACKAGE_ID` | `0Ho` package ID from the Dev Hub. Required for production packaging and release promotion operations. |
 
 ## Quality gates
 
@@ -89,7 +89,10 @@ Both pipelines now expose the quality checks as separate GitHub Actions jobs so 
 1. PMD static analysis using `sf scanner run` against the Apex classes and triggers changed in the current push. Any severity 1 or 2 violation in those changed files fails the `PMD Scan` job.
 2. ESLint for LWC and Aura using `npm run lint` against `./force-app/**/*.js`. Any ESLint error fails the `ESLint` job. Warnings are allowed.
 3. Salesforce Scanner security rules using `sf scanner run` against `./force-app` with category `Security` and severity threshold `1`. Any security violation fails the `Security Scan` job.
-4. Apex unit tests with code coverage using `sf apex run test` against the Testing Org alias `testorg`. When non-test Apex classes or triggers change, the workflow deploys the current source to `testorg`, runs local tests, requires org-wide Apex coverage to remain at or above 75%, and also requires every changed non-test Apex class or trigger to have at least 75% aggregate coverage. Any failure fails the `Apex Tests` job.
+4. XML validation using `xmllint` across `force-app` and `manifest`. Any malformed XML fails the `XML Validation` job.
+5. Metadata validation using `sf project deploy start --dry-run` against `testorg`. This catches deploy-time metadata and configuration issues before the actual release deployment.
+6. Apex unit tests with code coverage using `sf apex run test` against `testorg`. When non-test Apex classes or triggers change, the workflow deploys the current source to `testorg`, runs local tests, requires org-wide Apex coverage to remain at or above 75%, and also requires every changed non-test Apex class or trigger to have at least 75% aggregate coverage. Any failure fails the `Apex Tests` job.
+7. AppExchange report generation using Salesforce Code Analyzer v5 with `AppExchange` and `Recommended:Security` selectors. The report is uploaded as an artifact for packaging and listing review.
 
 The final branch protection checks remain `release-pipeline` and `production-pipeline`. Those jobs only pass when all upstream quality gate jobs and any eligible package actions complete successfully.
 
@@ -99,7 +102,7 @@ Salesforce AppExchange security review is a one-time review unless the package i
 
 Current temporary exception: the production workflow promotes the package version but skips PBO installation and post-install smoke tests until a PBO org is available and `PBOORG_SFDX_URL` is configured.
 
-Current temporary exception: the release workflow still runs auth, scanner, lint, and Apex quality gates when `PACKAGE_ID` is not configured, but it skips beta package creation, Testing Org package install, `.version-id` persistence, and beta tagging.
+Current temporary exception: the release workflow deploys source directly to the Testing Org regardless of `PACKAGE_ID`. Package creation and version promotion are reserved for the production pipeline.
 
 Current temporary exception: when a push contains no non-test Apex class or trigger changes, the Apex deployment and coverage gate is skipped because there is no changed Apex artifact to evaluate for per-file coverage.
 
