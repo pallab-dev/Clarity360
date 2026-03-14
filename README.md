@@ -111,6 +111,8 @@ Both pipelines now expose the quality checks as separate GitHub Actions jobs. Pu
 
 The final pull request checks remain `release-pipeline` and `production-pipeline`. Those jobs only pass when all upstream validation jobs succeed.
 
+Merged-branch deployment and promotion paths also re-check that the associated pull request validation workflow concluded successfully before any deployment or promotion step starts.
+
 ## AppExchange Security Review policy
 
 Salesforce AppExchange security review is a one-time review unless the package introduces new permissions, new external access, new integrations, or materially broader exposure. Use the checklist in [.github/pull_request_template.md](/Users/pallabsaikia/Downloads/Clarity360/.github/pull_request_template.md) to flag changes that require a release manager review and potential re-submission.

@@ -326,6 +326,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            let mergedPullNumber;
             const response = await github.rest.repos.listPullRequestsAssociatedWithCommit({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -348,6 +349,23 @@ jobs:
             }
             if (!mergedPull) {
               core.setFailed('Direct pushes to release branches are not allowed. Merge through a pull request.');
+              return;
+            }
+            mergedPullNumber = mergedPull.number;
+
+            const runsResponse = await github.rest.actions.listWorkflowRunsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              event: 'pull_request',
+              per_page: 100,
+            });
+            const validationRun = runsResponse.data.workflow_runs.find((run) =>
+              run.name === context.workflow &&
+              run.head_sha === mergedPull.head.sha &&
+              run.conclusion === 'success'
+            );
+            if (!validationRun) {
+              core.setFailed(`PR validation must succeed before deployment. No successful ${context.workflow} pull_request run was found for PR #${mergedPullNumber}.`);
             }
 
   deploy-testorg:
