@@ -1,0 +1,20 @@
+#!/bin/sh
+
+protected_branch=''
+
+while read local_ref local_sha remote_ref remote_sha
+do
+  case "$remote_ref" in
+    refs/heads/release/*|refs/heads/production)
+      protected_branch="${remote_ref#refs/heads/}"
+      ;;
+  esac
+done
+
+if [ -n "$protected_branch" ]; then
+  echo "Push blocked: direct pushes to ${protected_branch} are not allowed."
+  echo "Open a pull request from your feature branch instead."
+  exit 1
+fi
+
+exit 0

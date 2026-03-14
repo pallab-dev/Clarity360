@@ -1,6 +1,14 @@
 name: Release Pipeline
 
 on:
+  pull_request:
+    branches:
+      - 'release/**'
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
   push:
     branches:
       - 'release/**'
@@ -13,6 +21,7 @@ jobs:
   pmd-scan:
     name: PMD Scan
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -47,6 +56,7 @@ jobs:
     name: ESLint
     runs-on: ubuntu-latest
     needs: pmd-scan
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -68,6 +78,7 @@ jobs:
     name: Security Scan
     runs-on: ubuntu-latest
     needs: eslint-scan
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -101,6 +112,7 @@ jobs:
     name: XML Validation
     runs-on: ubuntu-latest
     needs: security-scan
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -117,6 +129,7 @@ jobs:
     name: Metadata Validation
     runs-on: ubuntu-latest
     needs: xml-validation
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -135,6 +148,7 @@ jobs:
     name: AppExchange Review
     runs-on: ubuntu-latest
     needs: metadata-validation
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -168,6 +182,7 @@ jobs:
     name: Scratch Validation
     runs-on: ubuntu-latest
     needs: appexchange-review
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -251,10 +266,36 @@ jobs:
         if: always()
         run: rm -f devhub.sfdx-url
 
+  verify-release-merge:
+    name: Verify Release Merge
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Verify push commit is associated with a pull request
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const response = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+            });
+            if (!response.data.length) {
+              core.setFailed('Direct pushes to release branches are not allowed. Merge through a pull request.');
+              return;
+            }
+            const mergedPull = response.data.find((pull) => pull.merged_at);
+            if (!mergedPull) {
+              core.setFailed('Push commit is not associated with a merged pull request.');
+            }
+
   deploy-testorg:
     name: Deploy To Testing Org
     runs-on: ubuntu-latest
-    needs: scratch-validation
+    needs: verify-release-merge
+    if: github.event_name == 'push'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -293,6 +334,7 @@ jobs:
     name: Post-Deploy Tests
     runs-on: ubuntu-latest
     needs: deploy-testorg
+    if: github.event_name == 'push'
     steps:
       - name: Install Salesforce CLI
         run: npm install -g @salesforce/cli
@@ -325,7 +367,17 @@ jobs:
   release-pipeline:
     name: release-pipeline
     runs-on: ubuntu-latest
-    needs: post-deploy-tests
+    needs: scratch-validation
+    if: github.event_name == 'pull_request'
     steps:
       - name: Mark release pipeline successful
-        run: echo "Release pipeline completed successfully."
+        run: echo "Release pull request validation completed successfully."
+
+  release-deployment:
+    name: Release Deployment
+    runs-on: ubuntu-latest
+    needs: post-deploy-tests
+    if: github.event_name == 'push'
+    steps:
+      - name: Mark release deployment successful
+        run: echo "Release branch deployment completed successfully."

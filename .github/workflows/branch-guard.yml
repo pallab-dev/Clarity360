@@ -1,0 +1,36 @@
+name: Branch Push Guard
+
+on:
+  push:
+    branches:
+      - 'release/**'
+      - production
+
+concurrency:
+  group: branch-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  block-direct-push:
+    name: block-direct-push
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Verify push commit is associated with a merged pull request
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const response = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+            });
+            if (!response.data.length) {
+              core.setFailed('Direct pushes to release or production branches are not allowed. Use a pull request.');
+              return;
+            }
+            const mergedPull = response.data.find((pull) => pull.merged_at);
+            if (!mergedPull) {
+              core.setFailed('Push commit is not associated with a merged pull request.');
+            }

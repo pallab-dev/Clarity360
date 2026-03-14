@@ -1,6 +1,14 @@
 name: Production Pipeline
 
 on:
+  pull_request:
+    branches:
+      - production
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
   push:
     branches:
       - production
@@ -13,6 +21,7 @@ jobs:
   pmd-scan:
     name: PMD Scan
     runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -47,6 +56,7 @@ jobs:
     name: ESLint
     runs-on: ubuntu-latest
     needs: pmd-scan
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -68,6 +78,7 @@ jobs:
     name: Security Scan
     runs-on: ubuntu-latest
     needs: eslint-scan
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -101,6 +112,7 @@ jobs:
     name: XML Validation
     runs-on: ubuntu-latest
     needs: security-scan
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -117,6 +129,7 @@ jobs:
     name: Metadata Validation
     runs-on: ubuntu-latest
     needs: xml-validation
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -135,6 +148,7 @@ jobs:
     name: AppExchange Review
     runs-on: ubuntu-latest
     needs: metadata-validation
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -168,6 +182,7 @@ jobs:
     name: Scratch Validation
     runs-on: ubuntu-latest
     needs: appexchange-review
+    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -251,10 +266,36 @@ jobs:
         if: always()
         run: rm -f devhub.sfdx-url
 
+  verify-production-merge:
+    name: Verify Production Merge
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    permissions:
+      pull-requests: read
+    steps:
+      - name: Verify push commit is associated with a pull request
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const response = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+            });
+            if (!response.data.length) {
+              core.setFailed('Direct pushes to production are not allowed. Merge through a pull request.');
+              return;
+            }
+            const mergedPull = response.data.find((pull) => pull.merged_at);
+            if (!mergedPull) {
+              core.setFailed('Push commit is not associated with a merged pull request.');
+            }
+
   promote-package:
     name: Promote Package
     runs-on: ubuntu-latest
-    needs: scratch-validation
+    needs: verify-production-merge
+    if: github.event_name == 'push'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -304,6 +345,7 @@ jobs:
     name: Create Release Tag
     runs-on: ubuntu-latest
     needs: promote-package
+    if: github.event_name == 'push'
     permissions:
       contents: write
     steps:
@@ -326,8 +368,17 @@ jobs:
   production-pipeline:
     name: production-pipeline
     runs-on: ubuntu-latest
-    needs:
-      - create-release-tag
+    needs: scratch-validation
+    if: github.event_name == 'pull_request'
     steps:
       - name: Mark production pipeline successful
-        run: echo "Production pipeline completed successfully."
+        run: echo "Production pull request validation completed successfully."
+
+  production-release:
+    name: Production Release
+    runs-on: ubuntu-latest
+    needs: create-release-tag
+    if: github.event_name == 'push'
+    steps:
+      - name: Mark production release successful
+        run: echo "Production release steps completed successfully."

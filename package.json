@@ -3,6 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
+    "install:hooks": "sh scripts/install-git-hooks.sh",
     "lint": "eslint ./force-app/**/*.js",
     "lint:fix": "eslint ./force-app/**/*.js --fix"
   },
