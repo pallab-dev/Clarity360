@@ -38,11 +38,33 @@ jobs:
       - name: Install Salesforce Scanner plugin
         run: sf plugins install @salesforce/sfdx-scanner
 
+      - name: Detect changed Apex files
+        run: |
+          mkdir -p .ci
+          git fetch --no-tags origin "${{ github.event.pull_request.base.ref }}"
+          git diff --name-only --diff-filter=ACMRTUXB "origin/${{ github.event.pull_request.base.ref }}...HEAD" \
+            -- 'force-app/main/default/classes/*.cls' \
+            -- 'force-app/main/default/triggers/*.trigger' > .ci/changed-apex-raw.txt
+          while IFS= read -r changed_path; do
+            if [ -e "$changed_path" ]; then
+              echo "$changed_path"
+            fi
+          done < .ci/changed-apex-raw.txt > .ci/changed-apex.txt
+          echo "Changed Apex files:"
+          cat .ci/changed-apex.txt || true
+
       - name: Run PMD scan
         run: |
+          if [ ! -s .ci/changed-apex.txt ]; then
+            echo "No changed Apex classes or triggers detected. Skipping PMD scan."
+            exit 0
+          fi
+          declare -a TARGET_ARGS
+          while IFS= read -r changed_path; do
+            TARGET_ARGS+=(--target "$changed_path")
+          done < .ci/changed-apex.txt
           sf scanner run \
-            --target "./force-app/**/*.cls" \
-            --target "./force-app/**/*.trigger" \
+            "${TARGET_ARGS[@]}" \
             --engine pmd \
             --severity-threshold 2 \
             --format table \

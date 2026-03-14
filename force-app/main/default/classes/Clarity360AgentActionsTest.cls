@@ -92,19 +92,6 @@ private class Clarity360AgentActionsTest {
             )
         };
 
-        List<ScanJob__c> jobs = [
-            SELECT Id, JobType__c
-            FROM ScanJob__c
-            WHERE JobType__c IN ('Usage Scan', 'Recommendation Rebuild')
-        ];
-        for (ScanJob__c job : jobs) {
-            if (job.JobType__c == 'Usage Scan') {
-                Test.setCreatedDate(job.Id, System.now().addHours(-2));
-            } else if (job.JobType__c == 'Recommendation Rebuild') {
-                Test.setCreatedDate(job.Id, System.now().addMinutes(-30));
-            }
-        }
-
         TestDataBundle bundle = new TestDataBundle();
         bundle.highRiskRecommendationId = highRiskRecommendation.Id;
         bundle.highRiskFieldKey = highRiskRecommendation.FieldKey__c;
@@ -112,7 +99,7 @@ private class Clarity360AgentActionsTest {
     }
 
     @IsTest
-    static void explainRecommendationReturnsStructuredRowForRecommendationId() {
+    static void explainRecommendation_returnsStructuredRow_forRecommendationId() {
         TestDataBundle bundle = seedData();
 
         Clarity360AgentActions.ExplainRecommendationRequest request =
@@ -126,27 +113,27 @@ private class Clarity360AgentActionsTest {
             );
         Test.stopTest();
 
-        System.assertEquals(1, results.size(), 'One action result should be returned.');
-        System.assertEquals('Deprecate', results[0].action, 'The action should reflect the recommendation action.');
-        System.assertEquals('Open', results[0].status, 'The recommendation status should be preserved.');
-        System.assertEquals(bundle.highRiskRecommendationId, results[0].recommendationId, 'The recommendation Id should match the seeded record.');
-        System.assert(results[0].summary.contains(bundle.highRiskFieldKey), 'The summary should mention the high-risk field key.');
+        System.assertEquals(1, results.size());
+        System.assertEquals('Deprecate', results[0].action);
+        System.assertEquals('Open', results[0].status);
+        System.assertEquals(bundle.highRiskRecommendationId, results[0].recommendationId);
+        System.assert(results[0].summary.contains(bundle.highRiskFieldKey));
     }
 
     @IsTest
-    static void explainRecommendationIsNullSafeForMissingInput() {
+    static void explainRecommendation_isNullSafe_forMissingInput() {
         Test.startTest();
         List<Clarity360AgentActions.AgentActionResult> results =
             Clarity360AgentActions.explainRecommendation(null);
         Test.stopTest();
 
-        System.assertEquals(1, results.size(), 'A null input should return a single envelope.');
-        System.assertEquals('Invalid Input', results[0].status, 'The status should explain the invalid input.');
-        System.assertEquals('ExplainRecommendation', results[0].action, 'The action should indicate the request type.');
+        System.assertEquals(1, results.size());
+        System.assertEquals('Invalid Input', results[0].status);
+        System.assertEquals('ExplainRecommendation', results[0].action);
     }
 
     @IsTest
-    static void getHighRiskRecommendationsFiltersAndReturnsRows() {
+    static void getHighRiskRecommendations_filtersAndReturnsRows() {
         seedData();
 
         Clarity360AgentActions.GetHighRiskRecommendationsRequest request =
@@ -162,14 +149,14 @@ private class Clarity360AgentActionsTest {
             );
         Test.stopTest();
 
-        System.assertEquals(1, results.size(), 'One recommendation should match the filters.');
-        System.assertEquals('Open', results[0].status, 'The returned recommendation should remain open.');
-        System.assert(results[0].riskScore >= 70, 'The returned recommendation should satisfy the minimum risk score.');
-        System.assertEquals('Deprecate', results[0].action, 'The recommended action should match the seeded data.');
+        System.assertEquals(1, results.size());
+        System.assertEquals('Open', results[0].status);
+        System.assert(results[0].riskScore >= 70);
+        System.assertEquals('Deprecate', results[0].action);
     }
 
     @IsTest
-    static void getHighRiskRecommendationsReturnsNoDataEnvelopeWhenNoRowsMatch() {
+    static void getHighRiskRecommendations_returnsNoDataEnvelope_whenNoRowsMatch() {
         seedData();
 
         Clarity360AgentActions.GetHighRiskRecommendationsRequest request =
@@ -184,13 +171,13 @@ private class Clarity360AgentActionsTest {
             );
         Test.stopTest();
 
-        System.assertEquals(1, results.size(), 'One envelope should be returned when no rows match.');
-        System.assertEquals('No Data', results[0].status, 'The status should indicate no rows matched.');
-        System.assertEquals('GetHighRiskRecommendations', results[0].action, 'The action should identify the request type.');
+        System.assertEquals(1, results.size());
+        System.assertEquals('No Data', results[0].status);
+        System.assertEquals('GetHighRiskRecommendations', results[0].action);
     }
 
     @IsTest
-    static void getRecentScanSummaryReturnsLatestJobSummary() {
+    static void getRecentScanSummary_returnsLatestJobSummary() {
         seedData();
 
         Clarity360AgentActions.GetRecentScanSummaryRequest request =
@@ -204,15 +191,15 @@ private class Clarity360AgentActionsTest {
             );
         Test.stopTest();
 
-        System.assertEquals(1, results.size(), 'One summary envelope should be returned.');
-        System.assertEquals('Completed', results[0].status, 'The latest job should be marked completed.');
-        System.assertEquals('Recommendation Rebuild', results[0].action, 'The most recent job should be returned.');
-        System.assert(results[0].summary.contains('Open recommendations=1'), 'The summary should include the open recommendation count.');
+        System.assertEquals(1, results.size());
+        System.assertEquals('Completed', results[0].status);
+        System.assertEquals('Recommendation Rebuild', results[0].action);
+        System.assert(results[0].summary.contains('Open recommendations=1'));
     }
 
     @IsTest
-    static void getRecentScanSummaryReturnsNoDataWhenLookbackExcludesJobs() {
-        ScanJob__c oldJob = new ScanJob__c(
+    static void getRecentScanSummary_returnsNoData_whenLookbackExcludesJobs() {
+        insert new ScanJob__c(
             JobType__c = 'Usage Scan',
             Status__c = 'Completed',
             StartedOn__c = System.now().addDays(-15),
@@ -220,8 +207,6 @@ private class Clarity360AgentActionsTest {
             ScopeSummary__c = 'Old run',
             ProgressPct__c = 100
         );
-        insert oldJob;
-        Test.setCreatedDate(oldJob.Id, System.now().addDays(-15));
 
         Clarity360AgentActions.GetRecentScanSummaryRequest request =
             new Clarity360AgentActions.GetRecentScanSummaryRequest();
@@ -234,8 +219,8 @@ private class Clarity360AgentActionsTest {
             );
         Test.stopTest();
 
-        System.assertEquals(1, results.size(), 'One envelope should be returned.');
-        System.assertEquals('No Data', results[0].status, 'Lookback should exclude the old job.');
-        System.assertEquals('GetRecentScanSummary', results[0].action, 'The action should identify the summary request.');
+        System.assertEquals(1, results.size());
+        System.assertEquals('No Data', results[0].status);
+        System.assertEquals('GetRecentScanSummary', results[0].action);
     }
 }
