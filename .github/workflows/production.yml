@@ -320,6 +320,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push'
     permissions:
+      actions: read
       pull-requests: read
     steps:
       - name: Verify push commit is associated with a pull request
