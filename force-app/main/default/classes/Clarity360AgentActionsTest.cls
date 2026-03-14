@@ -99,7 +99,7 @@ private class Clarity360AgentActionsTest {
     }
 
     @IsTest
-    static void explainRecommendation_returnsStructuredRow_forRecommendationId() {
+    static void explainRecommendationReturnsStructuredRowForRecommendationId() {
         TestDataBundle bundle = seedData();
 
         Clarity360AgentActions.ExplainRecommendationRequest request =
@@ -113,27 +113,27 @@ private class Clarity360AgentActionsTest {
             );
         Test.stopTest();
 
-        System.assertEquals(1, results.size());
-        System.assertEquals('Deprecate', results[0].action);
-        System.assertEquals('Open', results[0].status);
-        System.assertEquals(bundle.highRiskRecommendationId, results[0].recommendationId);
-        System.assert(results[0].summary.contains(bundle.highRiskFieldKey));
+        System.assertEquals(1, results.size(), 'One action result should be returned.');
+        System.assertEquals('Deprecate', results[0].action, 'The action should reflect the recommendation action.');
+        System.assertEquals('Open', results[0].status, 'The recommendation status should be preserved.');
+        System.assertEquals(bundle.highRiskRecommendationId, results[0].recommendationId, 'The recommendation Id should match the seeded record.');
+        System.assert(results[0].summary.contains(bundle.highRiskFieldKey), 'The summary should mention the high-risk field key.');
     }
 
     @IsTest
-    static void explainRecommendation_isNullSafe_forMissingInput() {
+    static void explainRecommendationIsNullSafeForMissingInput() {
         Test.startTest();
         List<Clarity360AgentActions.AgentActionResult> results =
             Clarity360AgentActions.explainRecommendation(null);
         Test.stopTest();
 
-        System.assertEquals(1, results.size());
-        System.assertEquals('Invalid Input', results[0].status);
-        System.assertEquals('ExplainRecommendation', results[0].action);
+        System.assertEquals(1, results.size(), 'A null input should return a single envelope.');
+        System.assertEquals('Invalid Input', results[0].status, 'The status should explain the invalid input.');
+        System.assertEquals('ExplainRecommendation', results[0].action, 'The action should indicate the request type.');
     }
 
     @IsTest
-    static void getHighRiskRecommendations_filtersAndReturnsRows() {
+    static void getHighRiskRecommendationsFiltersAndReturnsRows() {
         seedData();
 
         Clarity360AgentActions.GetHighRiskRecommendationsRequest request =
@@ -149,10 +149,10 @@ private class Clarity360AgentActionsTest {
             );
         Test.stopTest();
 
-        System.assertEquals(1, results.size());
-        System.assertEquals('Open', results[0].status);
-        System.assert(results[0].riskScore >= 70);
-        System.assertEquals('Deprecate', results[0].action);
+        System.assertEquals(1, results.size(), 'One recommendation should match the filters.');
+        System.assertEquals('Open', results[0].status, 'The returned recommendation should remain open.');
+        System.assert(results[0].riskScore >= 70, 'The returned recommendation should satisfy the minimum risk score.');
+        System.assertEquals('Deprecate', results[0].action, 'The recommended action should match the seeded data.');
     }
 
     @IsTest

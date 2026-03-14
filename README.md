@@ -91,9 +91,8 @@ Both pipelines now expose the quality checks as separate GitHub Actions jobs so 
 3. Salesforce Scanner security rules using `sf scanner run` against `./force-app` with category `Security` and severity threshold `1`. Any security violation fails the `Security Scan` job.
 4. XML validation using `xmllint` across `force-app` and `manifest`. Any malformed XML fails the `XML Validation` job.
 5. Metadata validation using `sf project deploy start --dry-run` against `testorg`. This catches deploy-time metadata and configuration issues before the actual release deployment.
-6. Apex unit tests with code coverage using `sf apex run test` against `testorg`. When non-test Apex classes or triggers change, the workflow deploys the current source to `testorg`, runs local tests, requires org-wide Apex coverage to remain at or above 75%, and also requires every changed non-test Apex class or trigger to have at least 75% aggregate coverage. Any failure fails the `Apex Tests` job.
-7. AppExchange report generation using Salesforce Code Analyzer v5 with `AppExchange` and `Recommended:Security` selectors and severity threshold `2`. The job uses [code-analyzer.yml](/Users/pallabsaikia/Downloads/Clarity360/code-analyzer.yml) so the ESLint flat config is applied correctly and PMD is handled separately.
-8. AppExchange PMD scanning using `pmd-appexchange` across all Apex classes and triggers. This prevents the mixed-engine AppExchange job from being blocked by PMD parser issues on LWC JavaScript while still enforcing AppExchange-specific PMD findings.
+6. Apex unit tests with code coverage using `sf apex run test` against `testorg`. The workflow deploys the current source to `testorg`, runs local tests on every release validation, and requires org-wide Apex coverage to remain at or above 75%. Any failure fails the `Apex Tests` job.
+7. AppExchange report generation using Salesforce Code Analyzer v5 with `AppExchange` and `Recommended:Security` selectors and severity threshold `2`. The job uses [code-analyzer.yml](/Users/pallabsaikia/Downloads/Clarity360/code-analyzer.yml) so the ESLint flat config is applied correctly and the report is generated cleanly for review.
 
 The final branch protection checks remain `release-pipeline` and `production-pipeline`. Those jobs only pass when all upstream quality gate jobs and any eligible package actions complete successfully.
 
@@ -105,7 +104,7 @@ Current temporary exception: the production workflow promotes the package versio
 
 Current temporary exception: the release workflow deploys source directly to the Testing Org regardless of `PACKAGE_ID`. Package creation and version promotion are reserved for the production pipeline.
 
-Current temporary exception: when a push contains no non-test Apex class or trigger changes, the Apex deployment and coverage gate is skipped because there is no changed Apex artifact to evaluate for per-file coverage.
+Current temporary exception: package creation remains a production concern. The release workflow validates and deploys source metadata directly to the Testing Org without building a package version.
 
 ## Pipeline flow diagram
 

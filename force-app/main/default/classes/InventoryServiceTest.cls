@@ -1,7 +1,7 @@
 @IsTest
 private class InventoryServiceTest {
     @IsTest
-    static void refreshInventory_createsRecords() {
+    static void refreshInventoryCreatesRecords() {
         Test.startTest();
         InventoryService.RefreshResult result = InventoryService.refreshInventory(false, 5);
         Test.stopTest();
@@ -22,7 +22,7 @@ private class InventoryServiceTest {
     }
 
     @IsTest
-    static void refreshInventoryChunk_advancesCursor() {
+    static void refreshInventoryChunkAdvancesCursor() {
         List<String> scoped = InventoryService.getScopedObjectNames(false, 6);
         System.assert(scoped.size() > 0, 'Expected scoped objects in test context.');
 
@@ -33,7 +33,7 @@ private class InventoryServiceTest {
     }
 
     @IsTest
-    static void cleanupExcludedInventory_marksInventoryInactive_and_removesDerivedRows() {
+    static void cleanupExcludedInventoryMarksInventoryInactiveAndRemovesDerivedRows() {
         insert new FieldInventory__c(
             FieldKey__c = 'Account.Legacy_Flag__c',
             ObjectApiName__c = 'Account',
@@ -67,8 +67,8 @@ private class InventoryServiceTest {
             WHERE FieldKey__c = 'Account.Legacy_Flag__c'
             LIMIT 1
         ];
-        System.assertEquals(false, retained.IsActive__c);
-        System.assertEquals(0, [SELECT COUNT() FROM UsageSignal__c WHERE FieldKey__c = 'Account.Legacy_Flag__c']);
-        System.assertEquals(0, [SELECT COUNT() FROM Recommendation__c WHERE FieldKey__c = 'Account.Legacy_Flag__c']);
+        System.assertEquals(false, retained.IsActive__c, 'Excluded inventory should be marked inactive.');
+        System.assertEquals(0, [SELECT COUNT() FROM UsageSignal__c WHERE FieldKey__c = 'Account.Legacy_Flag__c'], 'Usage signals for excluded inventory should be removed.');
+        System.assertEquals(0, [SELECT COUNT() FROM Recommendation__c WHERE FieldKey__c = 'Account.Legacy_Flag__c'], 'Recommendations for excluded inventory should be removed.');
     }
 }

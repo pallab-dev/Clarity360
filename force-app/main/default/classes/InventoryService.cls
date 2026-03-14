@@ -155,7 +155,6 @@ public with sharing class InventoryService {
         Integer includedFieldsForObject = 0;
 
         for (String fieldName : fieldNames) {
-            Schema.DescribeFieldResult fieldDescribe = fields.get(fieldName).getDescribe();
             // Guardrail for low-storage orgs: cap inventory volume per object.
             if (includedFieldsForObject >= 200) {
                 continue;

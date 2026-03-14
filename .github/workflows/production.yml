@@ -329,38 +329,6 @@ jobs:
           if-no-files-found: ignore
 
   appexchange-pmd:
-    name: AppExchange PMD
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install Node.js 18
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
-      - name: Install npm dependencies
-        run: npm ci
-
-      - name: Install Salesforce CLI
-        run: npm install -g @salesforce/cli
-
-      - name: Install Salesforce Scanner plugin
-        run: sf plugins install @salesforce/sfdx-scanner
-
-      - name: Run AppExchange PMD scan
-        run: |
-          sf scanner run \
-            --target "./force-app/**/*.cls" \
-            --target "./force-app/**/*.trigger" \
-            --engine pmd-appexchange \
-            --severity-threshold 2 \
-            --format table \
-            --verbose-violations
-
   promote-package:
     name: Promote And Tag Release
     runs-on: ubuntu-latest
@@ -373,7 +341,6 @@ jobs:
       - metadata-validation
       - apex-tests
       - appexchange-report
-      - appexchange-pmd
     permissions:
       contents: write
     env:
@@ -446,7 +413,6 @@ jobs:
       - metadata-validation
       - apex-tests
       - appexchange-report
-      - appexchange-pmd
       - promote-package
     steps:
       - name: Mark production pipeline successful

@@ -1,4 +1,4 @@
-config_root: .
+config_root: /home/runner/work/Clarity360/Clarity360
 engines:
   eslint:
     eslint_config_file: eslint.config.js
