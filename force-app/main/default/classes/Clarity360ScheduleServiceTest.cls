@@ -1,8 +1,7 @@
 @IsTest
 private class Clarity360ScheduleServiceTest {
     @IsTest
-    static void syncScheduleCreatesScheduledJob() {
-        ScanOrchestratorSchedulable.skipFullScanInTests = true;
+    static void syncSchedule_createsAndRemovesScheduledJob() {
         Clarity360SetupConfigService.SetupConfigDTO input = Clarity360SetupConfigService.load();
         input.isSetupComplete = true;
         input.enableScheduledScan = true;
@@ -20,31 +19,17 @@ private class Clarity360ScheduleServiceTest {
         System.assertEquals(1, scheduled.size());
         System.assertEquals('0 0 2 ? * SUN', scheduled[0].CronExpression);
         Test.stopTest();
-        ScanOrchestratorSchedulable.skipFullScanInTests = false;
-    }
 
-    @IsTest
-    static void syncScheduleRemovesScheduledJob() {
-        ScanOrchestratorSchedulable.skipFullScanInTests = true;
-        System.schedule(
-            Clarity360ScheduleService.JOB_NAME,
-            Clarity360ScheduleService.cronForFrequency('Weekly'),
-            new ScanOrchestratorSchedulable()
-        );
-
-        Clarity360SetupConfigService.SetupConfigDTO input = Clarity360SetupConfigService.load();
-        input.isSetupComplete = true;
         input.enableScheduledScan = false;
         input.scheduleEnabled = false;
-        input.scheduleFrequency = null;
         Clarity360SetupConfigService.save(input);
 
+        Test.startTest();
         Clarity360ScheduleService.syncSchedule();
         System.assertEquals(
             0,
-            [SELECT COUNT() FROM CronTrigger WHERE CronJobDetail.Name = :Clarity360ScheduleService.JOB_NAME],
-            'Disabling scheduled scans should abort the existing scheduled job.'
+            [SELECT COUNT() FROM CronTrigger WHERE CronJobDetail.Name = :Clarity360ScheduleService.JOB_NAME]
         );
-        ScanOrchestratorSchedulable.skipFullScanInTests = false;
+        Test.stopTest();
     }
 }
