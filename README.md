@@ -4,7 +4,7 @@
 
 Clarity360 is a Salesforce 2GP managed package repository. The repository uses protected promotion branches, two GitHub Actions pipelines, and no direct pushes to release or production branches.
 
-For teams staying on GitHub Free for a private repository, this repo also includes a local Git hook installer and a GitHub Actions push guard to reduce accidental direct pushes without paid branch protection.
+For teams staying on GitHub Free for a private repository, this repo also includes a local Git hook installer and merge-verification steps inside the deployment workflows to reduce accidental direct pushes without paid branch protection.
 
 ## Branch strategy
 

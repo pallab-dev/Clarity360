@@ -196,14 +196,20 @@ jobs:
         run: |
           mkdir -p .ci
           git fetch --no-tags origin "${{ github.event.pull_request.base.ref }}"
-          git diff --name-only "origin/${{ github.event.pull_request.base.ref }}...HEAD" \
-            -- 'force-app/main/default/classes/*.cls' \
-            -- 'force-app/main/default/triggers/*.trigger' > .ci/changed-apex-all.txt
-          grep -Ev 'Test\.cls$' .ci/changed-apex-all.txt > .ci/changed-apex-members.txt || true
+          git diff --name-only --diff-filter=ACMRTUXB "origin/${{ github.event.pull_request.base.ref }}...HEAD" \
+            -- force-app/main/default > .ci/changed-source-paths-raw.txt
+          while IFS= read -r changed_path; do
+            if [ -e "$changed_path" ]; then
+              echo "$changed_path"
+            fi
+          done < .ci/changed-source-paths-raw.txt > .ci/changed-source-paths.txt
+          grep -E '\.(cls|trigger)$' .ci/changed-source-paths.txt | grep -Ev 'Test\.cls$' > .ci/changed-apex-members.txt || true
           find force-app/main/default/classes -name '*Test.cls' -print \
             | sed 's#force-app/main/default/classes/##' \
             | sed 's#\.cls$##' \
             | sort > .ci/local-test-classes.txt
+          echo "Changed deploy source paths:"
+          cat .ci/changed-source-paths.txt || true
           echo "Changed Apex members:"
           cat .ci/changed-apex-members.txt || true
 
@@ -225,22 +231,22 @@ jobs:
             echo "No changed non-test Apex classes or triggers detected."
             exit 0
           fi
-          SOURCE_ARGS=""
+          declare -a SOURCE_ARGS
           while IFS= read -r member; do
-            SOURCE_ARGS="$SOURCE_ARGS --source-dir $member"
-          done < .ci/changed-apex-members.txt
-          TEST_ARGS=""
+            SOURCE_ARGS+=(--source-dir "$member")
+          done < .ci/changed-source-paths.txt
+          declare -a TEST_ARGS
           while IFS= read -r test_class; do
-            TEST_ARGS="$TEST_ARGS --tests $test_class"
+            TEST_ARGS+=(--tests "$test_class")
           done < .ci/local-test-classes.txt
           # RunSpecifiedTests enforces 75% coverage on each class/trigger in the deployment package.
-          eval sf project deploy start \
+          sf project deploy start \
             --target-org testorg \
-            $SOURCE_ARGS \
+            "${SOURCE_ARGS[@]}" \
             --ignore-conflicts \
             --dry-run \
             --test-level RunSpecifiedTests \
-            $TEST_ARGS \
+            "${TEST_ARGS[@]}" \
             --coverage-formatters text-summary \
             --results-dir changed-apex-validation \
             --wait 30
