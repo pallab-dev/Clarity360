@@ -33,6 +33,12 @@ jobs:
               return;
             }
 
+            const mergedBy = pull.merged_by?.login;
+            if (mergedBy !== 'pallab-dev') {
+              core.setFailed(`Production release is blocked because PR #${pull.number} was merged by ${mergedBy || 'an unknown user'}, not pallab-dev.`);
+              return;
+            }
+
             const runsResponse = await github.rest.actions.listWorkflowRuns({
               owner: context.repo.owner,
               repo: context.repo.repo,
