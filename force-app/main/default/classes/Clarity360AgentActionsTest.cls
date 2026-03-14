@@ -92,6 +92,19 @@ private class Clarity360AgentActionsTest {
             )
         };
 
+        List<ScanJob__c> jobs = [
+            SELECT Id, JobType__c
+            FROM ScanJob__c
+            WHERE JobType__c IN ('Usage Scan', 'Recommendation Rebuild')
+        ];
+        for (ScanJob__c job : jobs) {
+            if (job.JobType__c == 'Usage Scan') {
+                Test.setCreatedDate(job.Id, System.now().addHours(-2));
+            } else if (job.JobType__c == 'Recommendation Rebuild') {
+                Test.setCreatedDate(job.Id, System.now().addMinutes(-30));
+            }
+        }
+
         TestDataBundle bundle = new TestDataBundle();
         bundle.highRiskRecommendationId = highRiskRecommendation.Id;
         bundle.highRiskFieldKey = highRiskRecommendation.FieldKey__c;
@@ -207,6 +220,13 @@ private class Clarity360AgentActionsTest {
             ScopeSummary__c = 'Old run',
             ProgressPct__c = 100
         );
+        ScanJob__c oldJob = [
+            SELECT Id
+            FROM ScanJob__c
+            WHERE ScopeSummary__c = 'Old run'
+            LIMIT 1
+        ];
+        Test.setCreatedDate(oldJob.Id, System.now().addDays(-15));
 
         Clarity360AgentActions.GetRecentScanSummaryRequest request =
             new Clarity360AgentActions.GetRecentScanSummaryRequest();
@@ -219,8 +239,8 @@ private class Clarity360AgentActionsTest {
             );
         Test.stopTest();
 
-        System.assertEquals(1, results.size());
-        System.assertEquals('No Data', results[0].status);
-        System.assertEquals('GetRecentScanSummary', results[0].action);
+        System.assertEquals(1, results.size(), 'One envelope should be returned.');
+        System.assertEquals('No Data', results[0].status, 'Lookback should exclude the old job.');
+        System.assertEquals('GetRecentScanSummary', results[0].action, 'The action should identify the summary request.');
     }
 }

@@ -1,6 +1,7 @@
 @IsTest
 private class RecommendationEngineTest {
     private static void ensureRuntimeSetup() {
+        Clarity360Settings.resetCache();
         List<Clarity360SetupConfig__c> existing = [SELECT Id FROM Clarity360SetupConfig__c LIMIT 1];
         if (existing.isEmpty()) {
             insert new Clarity360SetupConfig__c(
@@ -20,8 +21,8 @@ private class RecommendationEngineTest {
     static void buildFromSignalsGeneratesExpectedAction() {
         ensureRuntimeSetup();
         FieldInventory__c inventory = new FieldInventory__c(
-            FieldKey__c = 'Account.Test_Field__c',
-            ObjectApiName__c = 'Account',
+            FieldKey__c = 'FieldInventory__c.Test_Field__c',
+            ObjectApiName__c = 'FieldInventory__c',
             FieldApiName__c = 'Test_Field__c'
         );
         insert inventory;
@@ -54,8 +55,8 @@ private class RecommendationEngineTest {
     static void buildFromSignalsGoldenDatasetKeepsWhenBelowNullThreshold() {
         ensureRuntimeSetup();
         FieldInventory__c inventory = new FieldInventory__c(
-            FieldKey__c = 'Account.Health_Score__c',
-            ObjectApiName__c = 'Account',
+            FieldKey__c = 'FieldInventory__c.Health_Score__c',
+            ObjectApiName__c = 'FieldInventory__c',
             FieldApiName__c = 'Health_Score__c'
         );
         insert inventory;
@@ -88,8 +89,8 @@ private class RecommendationEngineTest {
     static void buildFromSignalsGoldenDatasetInvestigatesWhenSampleMissing() {
         ensureRuntimeSetup();
         FieldInventory__c inventory = new FieldInventory__c(
-            FieldKey__c = 'Account.Stage_Indicator__c',
-            ObjectApiName__c = 'Account',
+            FieldKey__c = 'FieldInventory__c.Stage_Indicator__c',
+            ObjectApiName__c = 'FieldInventory__c',
             FieldApiName__c = 'Stage_Indicator__c'
         );
         insert inventory;

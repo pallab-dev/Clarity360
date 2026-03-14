@@ -166,14 +166,18 @@ private class Clarity360SetupWizardControllerTest {
 
     @IsTest
     static void getSetupStatePrefersLatestConfigRecord() {
-        insert new Clarity360SetupConfig__c(
+        Clarity360SetupConfig__c older = new Clarity360SetupConfig__c(
             ScopeMode__c = 'CustomOnly',
             IncludeStandardObjects__c = false
         );
-        insert new Clarity360SetupConfig__c(
+        insert older;
+        Clarity360SetupConfig__c newer = new Clarity360SetupConfig__c(
             ScopeMode__c = 'IncludeStandard',
             IncludeStandardObjects__c = true
         );
+        insert newer;
+        Test.setCreatedDate(older.Id, System.now().addMinutes(-2));
+        Test.setCreatedDate(newer.Id, System.now().addMinutes(-1));
 
         Test.startTest();
         Clarity360SetupWizardController.SetupState state = Clarity360SetupWizardController.getSetupState();

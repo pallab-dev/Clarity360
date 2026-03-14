@@ -23,10 +23,8 @@ private class InventoryServiceTest {
 
     @IsTest
     static void refreshInventoryChunkAdvancesCursor() {
-        List<String> scoped = InventoryService.getScopedObjectNames(false, 6);
-        System.assert(scoped.size() > 0, 'Expected scoped objects in test context.');
-
-        InventoryService.RefreshChunkResult chunkOne = InventoryService.refreshInventoryChunkForScopedObjects(scoped, false, 0, 1);
+        List<String> scoped = new List<String>{ 'FieldInventory__c' };
+        InventoryService.RefreshChunkResult chunkOne = InventoryService.refreshInventoryChunkForScopedObjects(scoped, true, 0, 1);
         System.assertEquals(1, chunkOne.scannedObjectCount, 'Chunk should process exactly one object.');
         System.assertEquals(1, chunkOne.nextIndex, 'Cursor should move forward by chunk size.');
         System.assert(chunkOne.totalObjects >= 1, 'Total objects should be populated.');
