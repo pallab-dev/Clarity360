@@ -17,7 +17,7 @@ private class RecommendationEngineTest {
     }
 
     @IsTest
-    static void buildFromSignals_generatesExpectedAction() {
+    static void buildFromSignalsGeneratesExpectedAction() {
         ensureRuntimeSetup();
         FieldInventory__c inventory = new FieldInventory__c(
             FieldKey__c = 'Account.Test_Field__c',
@@ -51,7 +51,7 @@ private class RecommendationEngineTest {
     }
 
     @IsTest
-    static void buildFromSignals_goldenDataset_keepsWhenBelowNullThreshold() {
+    static void buildFromSignalsGoldenDatasetKeepsWhenBelowNullThreshold() {
         ensureRuntimeSetup();
         FieldInventory__c inventory = new FieldInventory__c(
             FieldKey__c = 'Account.Health_Score__c',
@@ -85,7 +85,7 @@ private class RecommendationEngineTest {
     }
 
     @IsTest
-    static void buildFromSignals_goldenDataset_investigateWhenSampleMissing() {
+    static void buildFromSignalsGoldenDatasetInvestigatesWhenSampleMissing() {
         ensureRuntimeSetup();
         FieldInventory__c inventory = new FieldInventory__c(
             FieldKey__c = 'Account.Stage_Indicator__c',
@@ -119,7 +119,7 @@ private class RecommendationEngineTest {
     }
 
     @IsTest
-    static void rebuildAllRecommendations_generatesMetadataInventoryRecommendations() {
+    static void rebuildAllRecommendationsGeneratesMetadataInventoryRecommendations() {
         ensureRuntimeSetup();
 
         insert new MetadataComponentInventory__c(

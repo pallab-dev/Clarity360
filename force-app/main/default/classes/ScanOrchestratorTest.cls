@@ -11,7 +11,7 @@ private class ScanOrchestratorTest {
     }
 
     @IsTest
-    static void runInventoryOnly_completesJob() {
+    static void runInventoryOnlyCompletesJob() {
         Test.startTest();
         Id jobId = ScanOrchestrator.runInventoryOnly(false, 5);
         Test.stopTest();
@@ -28,7 +28,7 @@ private class ScanOrchestratorTest {
     }
 
     @IsTest
-    static void runFullScan_createsAndFinishesJob() {
+    static void runFullScanCreatesAndFinishesJob() {
         FullScanQueueable.skipUsageBatchInTests = true;
         Test.startTest();
         Id jobId = ScanOrchestrator.runFullScan();
@@ -49,7 +49,7 @@ private class ScanOrchestratorTest {
     }
 
     @IsTest
-    static void runInventoryOnlyV2_reusesExistingQueuedJob() {
+    static void runInventoryOnlyV2ReusesExistingQueuedJob() {
         Test.startTest();
         ScanOrchestrator.StartResult first = ScanOrchestrator.runInventoryOnlyV2(false, 5, 'req-a');
         ScanOrchestrator.StartResult second = ScanOrchestrator.runInventoryOnlyV2(false, 5, 'req-b');

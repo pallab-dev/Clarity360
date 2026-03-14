@@ -1,9 +1,11 @@
 /**
- * Centralizes CRUD and field-level access enforcement for application services.
+ * @description Centralizes CRUD and field-level access enforcement for application services.
  */
 public with sharing class Clarity360AccessControlService {
     /**
-     * Ensures the running user can read the specified object before use.
+     * @description Ensures the running user can read the specified object before use.
+     * @param objectType The object type being accessed.
+     * @param operationName The logical operation requesting access.
      */
     public void assertReadable(Schema.SObjectType objectType, String operationName) {
         if (objectType == null || objectType.getDescribe().isAccessible()) {
@@ -13,7 +15,9 @@ public with sharing class Clarity360AccessControlService {
     }
 
     /**
-     * Ensures the running user can create records of the specified object.
+     * @description Ensures the running user can create records of the specified object.
+     * @param objectType The object type being inserted.
+     * @param operationName The logical operation requesting access.
      */
     public void assertCreateable(Schema.SObjectType objectType, String operationName) {
         if (objectType == null || objectType.getDescribe().isCreateable()) {
@@ -23,7 +27,9 @@ public with sharing class Clarity360AccessControlService {
     }
 
     /**
-     * Ensures the running user can update records of the specified object.
+     * @description Ensures the running user can update records of the specified object.
+     * @param objectType The object type being updated.
+     * @param operationName The logical operation requesting access.
      */
     public void assertUpdateable(Schema.SObjectType objectType, String operationName) {
         if (objectType == null || objectType.getDescribe().isUpdateable()) {
@@ -33,7 +39,9 @@ public with sharing class Clarity360AccessControlService {
     }
 
     /**
-     * Ensures the running user can delete records of the specified object.
+     * @description Ensures the running user can delete records of the specified object.
+     * @param objectType The object type being deleted.
+     * @param operationName The logical operation requesting access.
      */
     public void assertDeleteable(Schema.SObjectType objectType, String operationName) {
         if (objectType == null || objectType.getDescribe().isDeletable()) {
@@ -43,7 +51,9 @@ public with sharing class Clarity360AccessControlService {
     }
 
     /**
-     * Removes unreadable fields from queried records before they are used.
+     * @description Removes unreadable fields from queried records before they are used.
+     * @param records The queried records to sanitize.
+     * @return The sanitized record list.
      */
     public List<SObject> stripReadable(List<SObject> records) {
         if (records == null || records.isEmpty()) {
@@ -53,7 +63,9 @@ public with sharing class Clarity360AccessControlService {
     }
 
     /**
-     * Removes inaccessible fields for insert and update operations in a mixed record list.
+     * @description Removes inaccessible fields for insert and update operations in a mixed record list.
+     * @param records The records to sanitize before DML.
+     * @return The sanitized record list.
      */
     public List<SObject> stripForUpsert(List<SObject> records) {
         if (records == null || records.isEmpty()) {
@@ -85,7 +97,8 @@ public with sharing class Clarity360AccessControlService {
     }
 
     /**
-     * Returns a shared access-control service instance.
+     * @description Returns a shared access-control service instance.
+     * @return A new access-control service.
      */
     public static Clarity360AccessControlService get() {
         return new Clarity360AccessControlService();

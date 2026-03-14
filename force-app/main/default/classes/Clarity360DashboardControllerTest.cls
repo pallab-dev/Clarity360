@@ -17,7 +17,7 @@ private class Clarity360DashboardControllerTest {
     }
 
     @IsTest
-    static void getRecentJobs_returnsPagedRows() {
+    static void getRecentJobsReturnsPagedRows() {
         List<ScanJob__c> jobsToInsert = new List<ScanJob__c>();
         for (Integer i = 0; i < 12; i++) {
             jobsToInsert.add(new ScanJob__c(
@@ -53,7 +53,7 @@ private class Clarity360DashboardControllerTest {
     }
 
     @IsTest
-    static void dashboardSummary_and_metadataRows_includeMetadataInventory() {
+    static void dashboardSummaryAndMetadataRowsIncludeMetadataInventory() {
         insert new MetadataComponentInventory__c(
             ComponentKey__c = 'META.CMDT.Clarity360Config__mdt',
             ComponentType__c = 'Custom Metadata Type',
@@ -93,7 +93,7 @@ private class Clarity360DashboardControllerTest {
     }
 
     @IsTest
-    static void getGlobalComponents_returnsInventoryRows() {
+    static void getGlobalComponentsReturnsInventoryRows() {
         Clarity360DashboardController.GlobalComponentRow validationRow = new Clarity360DashboardController.GlobalComponentRow();
         validationRow.key = 'Validation Rule|Account_Legacy_Check|Account';
         validationRow.componentType = 'Validation Rule';
@@ -128,7 +128,7 @@ private class Clarity360DashboardControllerTest {
     }
 
     @IsTest
-    static void runUsageScanV2_returnsOperationEnvelope() {
+    static void runUsageScanV2ReturnsOperationEnvelope() {
         ensureSetupComplete();
         Test.startTest();
         Clarity360DashboardController.OperationResult result = Clarity360DashboardController.runUsageScanV2('req-1');
@@ -140,7 +140,7 @@ private class Clarity360DashboardControllerTest {
     }
 
     @IsTest
-    static void deleteCustomField_deletesWhenEligible() {
+    static void deleteCustomFieldDeletesWhenEligible() {
         ensureSetupComplete();
         String fieldKey = 'Account.Legacy_Flag__c';
         insert new FieldInventory__c(FieldKey__c = fieldKey, ObjectApiName__c = 'Account', FieldApiName__c = 'Legacy_Flag__c');
@@ -182,7 +182,7 @@ private class Clarity360DashboardControllerTest {
     }
 
     @IsTest
-    static void deleteCustomField_blocksWhenInUse() {
+    static void deleteCustomFieldBlocksWhenInUse() {
         ensureSetupComplete();
         String fieldKey = 'Account.Legacy_Flag__c';
         insert new UsageSignal__c(
@@ -205,7 +205,7 @@ private class Clarity360DashboardControllerTest {
     }
 
     @IsTest
-    static void runAgentActionTest_explainRecommendation_returnsResult() {
+    static void runAgentActionTestExplainRecommendationReturnsResult() {
         ensureSetupComplete();
 
         FieldInventory__c inventory = new FieldInventory__c(
@@ -247,7 +247,7 @@ private class Clarity360DashboardControllerTest {
     }
 
     @IsTest
-    static void runAgentActionTest_highRiskAndRecentSummary_returnResults() {
+    static void runAgentActionTestHighRiskAndRecentSummaryReturnResults() {
         ensureSetupComplete();
 
         FieldInventory__c inventory = new FieldInventory__c(
@@ -320,7 +320,7 @@ private class Clarity360DashboardControllerTest {
     }
 
     @IsTest
-    static void getAgentAssistantAvailability_returnsEnvelope() {
+    static void getAgentAssistantAvailabilityReturnsEnvelope() {
         Test.startTest();
         Clarity360DashboardController.AgentAssistantAvailability availability =
             Clarity360DashboardController.getAgentAssistantAvailability();
@@ -333,7 +333,7 @@ private class Clarity360DashboardControllerTest {
     }
 
     @IsTest
-    static void askAgentAssistant_returnsSimpleEnglishResponse() {
+    static void askAgentAssistantReturnsSimpleEnglishResponse() {
         ensureSetupComplete();
 
         FieldInventory__c inventory = new FieldInventory__c(
@@ -366,7 +366,7 @@ private class Clarity360DashboardControllerTest {
     }
 
     @IsTest
-    static void askAgentAssistant_supportsClarificationFollowUp() {
+    static void askAgentAssistantSupportsClarificationFollowUp() {
         ensureSetupComplete();
 
         insert new Recommendation__c(
@@ -393,7 +393,7 @@ private class Clarity360DashboardControllerTest {
     }
 
     @IsTest
-    static void askAgentAssistant_answersGenericQuestionFromData() {
+    static void askAgentAssistantAnswersGenericQuestionFromData() {
         ensureSetupComplete();
 
         insert new Recommendation__c(

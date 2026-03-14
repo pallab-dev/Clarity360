@@ -1,7 +1,7 @@
 @IsTest
 private class DataSamplerTest {
     @IsTest
-    static void scanObject_buildsSignalsWithNullRate() {
+    static void scanObjectBuildsSignalsWithNullRate() {
         insert new List<Account>{
             new Account(Name = 'Acme A', NumberOfEmployees = 10),
             new Account(Name = 'Acme B'),
@@ -46,7 +46,7 @@ private class DataSamplerTest {
     }
 
     @IsTest
-    static void scanObject_skipsDuplicateIdSelection() {
+    static void scanObjectSkipsDuplicateIdSelection() {
         insert new Account(Name = 'Acme D');
 
         FieldInventory__c idInventory = new FieldInventory__c(

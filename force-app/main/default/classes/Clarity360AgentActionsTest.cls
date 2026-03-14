@@ -156,7 +156,7 @@ private class Clarity360AgentActionsTest {
     }
 
     @IsTest
-    static void getHighRiskRecommendations_returnsNoDataEnvelope_whenNoRowsMatch() {
+    static void getHighRiskRecommendationsReturnsNoDataEnvelopeWhenNoRowsMatch() {
         seedData();
 
         Clarity360AgentActions.GetHighRiskRecommendationsRequest request =
@@ -171,13 +171,13 @@ private class Clarity360AgentActionsTest {
             );
         Test.stopTest();
 
-        System.assertEquals(1, results.size());
-        System.assertEquals('No Data', results[0].status);
-        System.assertEquals('GetHighRiskRecommendations', results[0].action);
+        System.assertEquals(1, results.size(), 'One envelope should be returned when no rows match.');
+        System.assertEquals('No Data', results[0].status, 'The status should indicate no rows matched.');
+        System.assertEquals('GetHighRiskRecommendations', results[0].action, 'The action should identify the request type.');
     }
 
     @IsTest
-    static void getRecentScanSummary_returnsLatestJobSummary() {
+    static void getRecentScanSummaryReturnsLatestJobSummary() {
         seedData();
 
         Clarity360AgentActions.GetRecentScanSummaryRequest request =
@@ -191,14 +191,14 @@ private class Clarity360AgentActionsTest {
             );
         Test.stopTest();
 
-        System.assertEquals(1, results.size());
-        System.assertEquals('Completed', results[0].status);
-        System.assertEquals('Recommendation Rebuild', results[0].action);
-        System.assert(results[0].summary.contains('Open recommendations=1'));
+        System.assertEquals(1, results.size(), 'One summary envelope should be returned.');
+        System.assertEquals('Completed', results[0].status, 'The latest job should be marked completed.');
+        System.assertEquals('Recommendation Rebuild', results[0].action, 'The most recent job should be returned.');
+        System.assert(results[0].summary.contains('Open recommendations=1'), 'The summary should include the open recommendation count.');
     }
 
     @IsTest
-    static void getRecentScanSummary_returnsNoData_whenLookbackExcludesJobs() {
+    static void getRecentScanSummaryReturnsNoDataWhenLookbackExcludesJobs() {
         insert new ScanJob__c(
             JobType__c = 'Usage Scan',
             Status__c = 'Completed',

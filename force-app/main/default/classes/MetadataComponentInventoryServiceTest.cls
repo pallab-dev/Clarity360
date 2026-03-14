@@ -1,7 +1,7 @@
 @IsTest
 private class MetadataComponentInventoryServiceTest {
     @IsTest
-    static void refreshAll_buildsInventoryFromMixedSources() {
+    static void refreshAllBuildsInventoryFromMixedSources() {
         MetadataComponentInventoryService.ComponentRecord cmdt = new MetadataComponentInventoryService.ComponentRecord();
         cmdt.componentKey = 'META.CMDT.Clarity360Config__mdt';
         cmdt.componentType = 'Custom Metadata Type';

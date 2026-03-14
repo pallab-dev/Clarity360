@@ -6,57 +6,6 @@ on:
       - production
 
 jobs:
-  prepare-changes:
-    name: Prepare Changes
-    runs-on: ubuntu-latest
-    outputs:
-      changed_apex_files: ${{ steps.diff.outputs.changed_apex_files }}
-      changed_non_test_apex_names: ${{ steps.diff.outputs.changed_non_test_apex_names }}
-      has_changed_apex: ${{ steps.diff.outputs.has_changed_apex }}
-      has_changed_non_test_apex: ${{ steps.diff.outputs.has_changed_non_test_apex }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Detect changed Apex and trigger files
-        id: diff
-        run: |
-          BASE_SHA="${{ github.event.before }}"
-          if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
-            if git rev-parse HEAD^ >/dev/null 2>&1; then
-              BASE_SHA=$(git rev-parse HEAD^)
-            else
-              BASE_SHA=$(git rev-list --max-parents=0 HEAD)
-            fi
-          fi
-
-          CHANGED_FILES=$(git diff --name-only "$BASE_SHA" "$GITHUB_SHA")
-          CHANGED_APEX_FILES=$(printf '%s\n' "$CHANGED_FILES" | grep -E '^force-app/main/default/(classes/.*\.cls|triggers/.*\.trigger)$' || true)
-          CHANGED_NON_TEST_APEX_NAMES=$(printf '%s\n' "$CHANGED_APEX_FILES" | sed -nE "s#^force-app/main/default/classes/([^/]+)\.cls$#\1#p; s#^force-app/main/default/triggers/([^/]+)\.trigger$#\1#p" | grep -Ev 'Test$' || true)
-
-          {
-            echo "changed_apex_files<<EOF"
-            printf '%s\n' "$CHANGED_APEX_FILES"
-            echo "EOF"
-            echo "changed_non_test_apex_names<<EOF"
-            printf '%s\n' "$CHANGED_NON_TEST_APEX_NAMES"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-          if [ -n "$CHANGED_APEX_FILES" ]; then
-            echo "has_changed_apex=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_changed_apex=false" >> "$GITHUB_OUTPUT"
-          fi
-
-          if [ -n "$CHANGED_NON_TEST_APEX_NAMES" ]; then
-            echo "has_changed_non_test_apex=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_changed_non_test_apex=false" >> "$GITHUB_OUTPUT"
-          fi
-
   pmd-scan:
     name: PMD Scan
     runs-on: ubuntu-latest
@@ -194,12 +143,9 @@ jobs:
         if: always()
         run: rm -f testorg.sfdx-url
 
-  apex-tests:
-    name: Apex Tests
+  appexchange-report:
+    name: AppExchange Report
     runs-on: ubuntu-latest
-    needs: prepare-changes
-    env:
-      CHANGED_NON_TEST_APEX_NAMES: ${{ needs.prepare-changes.outputs.changed_non_test_apex_names }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -213,95 +159,6 @@ jobs:
 
       - name: Install npm dependencies
         run: npm ci
-
-      - name: Install Salesforce CLI
-        run: npm install -g @salesforce/cli
-
-      - name: Validate required test org secret
-        run: test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
-
-      - name: Write Testing Org auth URL to file
-        run: echo "${{ secrets.TESTORG_SFDX_URL }}" > testorg.sfdx-url
-
-      - name: Authenticate Testing Org via sfdx-url
-        run: |
-          sf org login sfdx-url \
-            --sfdx-url-file testorg.sfdx-url \
-            --alias testorg
-
-      - name: Deploy source to Testing Org for Apex validation
-        if: ${{ needs.prepare-changes.outputs.has_changed_non_test_apex == 'true' }}
-        run: |
-          sf project deploy start \
-            --target-org testorg \
-            --source-dir force-app/main/default \
-            --ignore-conflicts \
-            --wait 30
-
-      - name: Run Apex tests with coverage
-        if: ${{ needs.prepare-changes.outputs.has_changed_non_test_apex == 'true' }}
-        run: |
-          sf apex run test \
-            --target-org testorg \
-            --test-level RunLocalTests \
-            --code-coverage \
-            --result-format human \
-            --wait 30 | tee apex-test-results.txt
-          ORG_COVERAGE=$(sf data query --use-tooling-api --json --target-org testorg --query "SELECT PercentCovered FROM ApexOrgWideCoverage")
-          ORG_COVERAGE_PCT=$(echo "$ORG_COVERAGE" | jq -r '.result.records[0].PercentCovered // empty')
-          if [ -z "$ORG_COVERAGE_PCT" ]; then
-            echo "Unable to determine org-wide Apex coverage from tooling query."
-            exit 1
-          fi
-          if ! awk "BEGIN {exit !($ORG_COVERAGE_PCT >= 75)}"; then
-            echo "Org-wide Apex coverage is below 75%: ${ORG_COVERAGE_PCT}%"
-            exit 1
-          fi
-
-          SOQL_NAMES=$(printf '%s\n' "$CHANGED_NON_TEST_APEX_NAMES" | sed "/^$/d; s/'/\\\\'/g; s/.*/'&'/" | paste -sd, -)
-          if [ -z "$SOQL_NAMES" ]; then
-            echo "No non-test Apex classes or triggers changed. Individual coverage validation is skipped."
-            exit 0
-          fi
-
-          COVERAGE_JSON=$(sf data query --use-tooling-api --json --target-org testorg --query "SELECT ApexClassOrTrigger.Name, NumLinesCovered, NumLinesUncovered FROM ApexCodeCoverageAggregate WHERE ApexClassOrTrigger.Name IN ($SOQL_NAMES)")
-
-          while IFS= read -r apex_name; do
-            [ -n "$apex_name" ] || continue
-            COVERED=$(echo "$COVERAGE_JSON" | jq -r --arg NAME "$apex_name" '.result.records[]? | select(.ApexClassOrTrigger.Name == $NAME) | .NumLinesCovered' | head -n 1)
-            UNCOVERED=$(echo "$COVERAGE_JSON" | jq -r --arg NAME "$apex_name" '.result.records[]? | select(.ApexClassOrTrigger.Name == $NAME) | .NumLinesUncovered' | head -n 1)
-            if [ -z "$COVERED" ] || [ -z "$UNCOVERED" ]; then
-              echo "No coverage aggregate found for $apex_name."
-              exit 1
-            fi
-            TOTAL=$((COVERED + UNCOVERED))
-            if [ "$TOTAL" -le 0 ]; then
-              echo "No executable lines reported for $apex_name."
-              exit 1
-            fi
-            PERCENT=$((COVERED * 100 / TOTAL))
-            if [ "$PERCENT" -lt 75 ]; then
-              echo "$apex_name coverage is below 75%: ${PERCENT}%"
-              exit 1
-            fi
-          done <<< "$CHANGED_NON_TEST_APEX_NAMES"
-
-      - name: Skip Apex validation when no non-test Apex changed
-        if: ${{ needs.prepare-changes.outputs.has_changed_non_test_apex != 'true' }}
-        run: echo "No non-test Apex or trigger changes detected. Apex deployment and coverage validation are skipped."
-
-      - name: Clean up auth file
-        if: always()
-        run: rm -f testorg.sfdx-url
-
-  appexchange-report:
-    name: AppExchange Report
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Install Salesforce CLI
         run: npm install -g @salesforce/cli
@@ -328,23 +185,16 @@ jobs:
           path: CodeAnalyzer.html
           if-no-files-found: ignore
 
-  appexchange-pmd:
-  promote-package:
-    name: Promote And Tag Release
+  deploy-test-source-for-tests:
+    name: Deploy Test Source
     runs-on: ubuntu-latest
     needs:
-      - prepare-changes
       - pmd-scan
       - eslint-scan
       - security-scan
       - xml-validation
       - metadata-validation
-      - apex-tests
       - appexchange-report
-    permissions:
-      contents: write
-    env:
-      DEVHUB_SFDX_URL: ${{ secrets.DEVHUB_SFDX_URL }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -354,17 +204,128 @@ jobs:
       - name: Install Salesforce CLI
         run: npm install -g @salesforce/cli
 
-      - name: Validate production deployment prerequisites
+      - name: Validate required test org secret
+        run: test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
+
+      - name: Write Testing Org auth URL to file
+        run: echo "${{ secrets.TESTORG_SFDX_URL }}" > testorg.sfdx-url
+
+      - name: Authenticate Testing Org via sfdx-url
+        run: |
+          sf org login sfdx-url \
+            --sfdx-url-file testorg.sfdx-url \
+            --alias testorg
+
+      - name: Deploy source to Testing Org for Apex validation
+        run: |
+          sf project deploy start \
+            --target-org testorg \
+            --source-dir force-app/main/default \
+            --ignore-conflicts \
+            --wait 30
+
+      - name: Clean up auth file
+        if: always()
+        run: rm -f testorg.sfdx-url
+
+  apex-tests:
+    name: Apex Tests
+    runs-on: ubuntu-latest
+    needs: deploy-test-source-for-tests
+    steps:
+      - name: Install Salesforce CLI
+        run: npm install -g @salesforce/cli
+
+      - name: Validate required test org secret
+        run: test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
+
+      - name: Write Testing Org auth URL to file
+        run: echo "${{ secrets.TESTORG_SFDX_URL }}" > testorg.sfdx-url
+
+      - name: Authenticate Testing Org via sfdx-url
+        run: |
+          sf org login sfdx-url \
+            --sfdx-url-file testorg.sfdx-url \
+            --alias testorg
+
+      - name: Run Apex tests with coverage
+        run: |
+          sf apex run test \
+            --target-org testorg \
+            --test-level RunLocalTests \
+            --code-coverage \
+            --result-format human \
+            --wait 30
+
+      - name: Clean up auth file
+        if: always()
+        run: rm -f testorg.sfdx-url
+
+  apex-coverage:
+    name: Apex Coverage
+    runs-on: ubuntu-latest
+    needs: apex-tests
+    steps:
+      - name: Install Salesforce CLI
+        run: npm install -g @salesforce/cli
+
+      - name: Validate required test org secret
+        run: test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
+
+      - name: Write Testing Org auth URL to file
+        run: echo "${{ secrets.TESTORG_SFDX_URL }}" > testorg.sfdx-url
+
+      - name: Authenticate Testing Org via sfdx-url
+        run: |
+          sf org login sfdx-url \
+            --sfdx-url-file testorg.sfdx-url \
+            --alias testorg
+
+      - name: Verify org-wide Apex coverage
+        run: |
+          ORG_COVERAGE_JSON=$(sf data query \
+            --use-tooling-api \
+            --json \
+            --target-org testorg \
+            --query "SELECT PercentCovered FROM ApexOrgWideCoverage")
+          ORG_COVERAGE_PCT=$(echo "$ORG_COVERAGE_JSON" | jq -r '.result.records[0].PercentCovered // empty')
+          if [ -z "$ORG_COVERAGE_PCT" ]; then
+            echo "Unable to determine org-wide Apex coverage from tooling query."
+            exit 1
+          fi
+          if ! awk "BEGIN {exit !($ORG_COVERAGE_PCT >= 75)}"; then
+            echo "Org-wide Apex coverage is below 75%: ${ORG_COVERAGE_PCT}%"
+            exit 1
+          fi
+
+      - name: Clean up auth file
+        if: always()
+        run: rm -f testorg.sfdx-url
+
+  promote-package:
+    name: Promote Package
+    runs-on: ubuntu-latest
+    needs: apex-coverage
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Salesforce CLI
+        run: npm install -g @salesforce/cli
+
+      - name: Validate promotion prerequisites
         run: |
           if [ ! -f .version-id ]; then
-            echo ".version-id is not present. Promotion and release tagging are skipped."
+            echo ".version-id is not present. Package promotion is skipped."
             exit 0
           fi
-          test -n "$DEVHUB_SFDX_URL" || { echo "Missing DEVHUB_SFDX_URL"; exit 1; }
+          test -n "${{ secrets.DEVHUB_SFDX_URL }}" || { echo "Missing DEVHUB_SFDX_URL"; exit 1; }
 
       - name: Write Dev Hub auth URL to file
         if: ${{ hashFiles('.version-id') != '' }}
-        run: echo "$DEVHUB_SFDX_URL" > devhub.sfdx-url
+        run: echo "${{ secrets.DEVHUB_SFDX_URL }}" > devhub.sfdx-url
 
       - name: Authenticate Dev Hub via sfdx-url
         if: ${{ hashFiles('.version-id') != '' }}
@@ -386,9 +347,25 @@ jobs:
             --package ${{ steps.ver.outputs.VERSION_ID }} \
             --no-prompt
 
-      - name: Skip PBO deployment until PBO org is available
-        if: ${{ hashFiles('.version-id') != '' }}
-        run: echo "PBO deployment and smoke tests are disabled until PBOORG_SFDX_URL is configured."
+      - name: Clean up auth file
+        if: always()
+        run: rm -f devhub.sfdx-url
+
+  create-release-tag:
+    name: Create Release Tag
+    runs-on: ubuntu-latest
+    needs: promote-package
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Skip release tag when no version exists
+        if: ${{ hashFiles('.version-id') == '' }}
+        run: echo ".version-id is not present. Release tag creation is skipped."
 
       - name: Create a production Git release tag
         if: ${{ hashFiles('.version-id') != '' }}
@@ -397,23 +374,11 @@ jobs:
           git tag "$TAG"
           git push origin "$TAG"
 
-      - name: Clean up auth file
-        if: always()
-        run: rm -f devhub.sfdx-url
-
   production-pipeline:
     name: production-pipeline
     runs-on: ubuntu-latest
     needs:
-      - prepare-changes
-      - pmd-scan
-      - eslint-scan
-      - security-scan
-      - xml-validation
-      - metadata-validation
-      - apex-tests
-      - appexchange-report
-      - promote-package
+      - create-release-tag
     steps:
       - name: Mark production pipeline successful
         run: echo "Production pipeline completed successfully."
