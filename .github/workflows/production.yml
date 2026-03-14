@@ -274,7 +274,6 @@ jobs:
             --ignore-conflicts \
             --dry-run \
             --test-level NoTestRun \
-            --results-dir full-package-validation \
             --wait 30
 
       - name: Run full local Apex tests in Testing Org
