@@ -174,7 +174,7 @@ export default class Clarity360SetupWizard extends NavigationMixin(LightningElem
         try {
             try {
                 completed = await isSetupComplete();
-            } catch (completionError) {
+            } catch {
                 completed = false;
             }
             const state = await getSetupState();
@@ -414,7 +414,7 @@ export default class Clarity360SetupWizard extends NavigationMixin(LightningElem
             if (!Number.isNaN(saved) && saved >= 1 && saved <= LAST_STEP) {
                 this.currentStep = saved;
             }
-        } catch (error) {
+        } catch {
             // Ignore storage access failures in restricted browsing contexts.
         }
     }
@@ -422,7 +422,7 @@ export default class Clarity360SetupWizard extends NavigationMixin(LightningElem
     persistStepToStorage() {
         try {
             window.sessionStorage.setItem(this.getStepStorageKey(), String(this.currentStep));
-        } catch (error) {
+        } catch {
             // Ignore storage access failures in restricted browsing contexts.
         }
     }
