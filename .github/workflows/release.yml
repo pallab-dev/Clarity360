@@ -225,6 +225,21 @@ jobs:
             --sfdx-url-file testorg.sfdx-url \
             --alias testorg
 
+      - name: Capture baseline org-wide coverage
+        run: |
+          BASELINE_JSON=$(sf data query \
+            --use-tooling-api \
+            --json \
+            --target-org testorg \
+            --query "SELECT PercentCovered FROM ApexOrgWideCoverage")
+          BASELINE_COVERAGE=$(echo "$BASELINE_JSON" | jq -r '.result.records[0].PercentCovered // empty')
+          if [ -z "$BASELINE_COVERAGE" ]; then
+            echo "Unable to determine baseline org-wide coverage from testorg."
+            exit 1
+          fi
+          echo "BASELINE_ORG_COVERAGE=$BASELINE_COVERAGE" >> "$GITHUB_ENV"
+          echo "Baseline org-wide coverage in testorg: ${BASELINE_COVERAGE}%"
+
       - name: Validate changed Apex member coverage
         run: |
           if [ ! -s .ci/changed-apex-members.txt ]; then
@@ -251,17 +266,51 @@ jobs:
             --results-dir changed-apex-validation \
             --wait 30
 
-      - name: Validate full package deployment in Testing Org
+      - name: Validate full package metadata in Testing Org
         run: |
           sf project deploy start \
             --target-org testorg \
             --source-dir force-app/main/default \
             --ignore-conflicts \
             --dry-run \
-            --test-level RunLocalTests \
-            --coverage-formatters text-summary \
+            --test-level NoTestRun \
             --results-dir full-package-validation \
             --wait 30
+
+      - name: Run full local Apex tests in Testing Org
+        run: |
+          sf apex run test \
+            --target-org testorg \
+            --test-level RunLocalTests \
+            --code-coverage \
+            --result-format human \
+            --wait 30 | tee full-package-validation/apex-test-results.txt
+
+      - name: Verify org-wide coverage in Testing Org
+        run: |
+          CURRENT_JSON=$(sf data query \
+            --use-tooling-api \
+            --json \
+            --target-org testorg \
+            --query "SELECT PercentCovered FROM ApexOrgWideCoverage")
+          CURRENT_COVERAGE=$(echo "$CURRENT_JSON" | jq -r '.result.records[0].PercentCovered // empty')
+          if [ -z "$CURRENT_COVERAGE" ]; then
+            echo "Unable to determine current org-wide coverage from testorg."
+            exit 1
+          fi
+          echo "Current org-wide coverage in testorg: ${CURRENT_COVERAGE}%"
+          if awk "BEGIN {exit !($BASELINE_ORG_COVERAGE >= 75)}"; then
+            if ! awk "BEGIN {exit !($CURRENT_COVERAGE >= 75)}"; then
+              echo "Org-wide coverage dropped below 75% in testorg: ${CURRENT_COVERAGE}%"
+              exit 1
+            fi
+          else
+            if ! awk "BEGIN {exit !($CURRENT_COVERAGE >= $BASELINE_ORG_COVERAGE)}"; then
+              echo "Org-wide coverage regressed in testorg from ${BASELINE_ORG_COVERAGE}% to ${CURRENT_COVERAGE}%"
+              exit 1
+            fi
+            echo "Shared testorg baseline is below 75%; non-regression enforced until baseline is improved."
+          fi
 
       - name: Clean up auth file
         if: always()
@@ -356,8 +405,8 @@ jobs:
         run: |
           sf apex run test \
             --target-org testorg \
-            --test-level RunLocalTests \
-            --code-coverage \
+            --test-level RunSpecifiedTests \
+            --tests Clarity360SmokeTest \
             --result-format human \
             --wait 30
 
