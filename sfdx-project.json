@@ -6,7 +6,7 @@
     }
   ],
   "name": "PACKAGE_NAME",
-  "namespace": "YOUR_NAMESPACE",
+  "namespace": "",
   "sfdcLoginUrl": "https://login.salesforce.com",
   "sourceApiVersion": "59.0"
 }
