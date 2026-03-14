@@ -332,13 +332,23 @@ jobs:
               repo: context.repo.repo,
               commit_sha: context.sha,
             });
-            if (!response.data.length) {
-              core.setFailed('Direct pushes to release branches are not allowed. Merge through a pull request.');
-              return;
-            }
-            const mergedPull = response.data.find((pull) => pull.merged_at);
+            let mergedPull = response.data.find((pull) => pull.merged_at);
             if (!mergedPull) {
-              core.setFailed('Push commit is not associated with a merged pull request.');
+              const commitMessage = context.payload.head_commit?.message || '';
+              const prMatch = commitMessage.match(/\(#(\d+)\)$/m);
+              if (prMatch) {
+                const fallbackPull = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: Number(prMatch[1]),
+                });
+                if (fallbackPull.data.merged_at) {
+                  mergedPull = fallbackPull.data;
+                }
+              }
+            }
+            if (!mergedPull) {
+              core.setFailed('Direct pushes to release branches are not allowed. Merge through a pull request.');
             }
 
   deploy-testorg:
