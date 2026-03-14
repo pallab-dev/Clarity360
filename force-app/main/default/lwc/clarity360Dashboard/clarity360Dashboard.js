@@ -101,8 +101,6 @@ export default class Clarity360Dashboard extends NavigationMixin(LightningElemen
     recommendationGroupsCache;
     recommendationGroupsCacheKey;
     globalGroupsInitialized = false;
-    searchSuggestionTimer;
-
     metadataColumns = METADATA_COLUMNS;
     jobColumns = JOB_COLUMNS;
 
@@ -151,9 +149,8 @@ export default class Clarity360Dashboard extends NavigationMixin(LightningElemen
             if (this.setupComplete === false) {
                 this.jobs = [];
                 this.jobsTotalCount = 0;
-                return;
             }
-        } catch (error) {
+        } catch {
             this.setupComplete = true;
         } finally {
             this.isSetupGuidanceBusy = false;
@@ -671,7 +668,7 @@ export default class Clarity360Dashboard extends NavigationMixin(LightningElemen
                 ...this.monitoringSnapshot,
                 ...(snapshot || {})
             };
-        } catch (error) {
+        } catch {
             this.monitoringSnapshot = {
                 ...this.monitoringSnapshot,
                 limitMetrics: [],
@@ -724,10 +721,7 @@ export default class Clarity360Dashboard extends NavigationMixin(LightningElemen
 
     handleSearchInputChange(event) {
         this.searchFilter = event.detail.value;
-        window.clearTimeout(this.searchSuggestionTimer);
-        this.searchSuggestionTimer = window.setTimeout(() => {
-            this.searchSuggestions = this.buildSearchSuggestions(this.normalizedSearchFilter);
-        }, 180);
+        this.searchSuggestions = this.buildSearchSuggestions(this.normalizedSearchFilter);
         this.isSearchModalOpen = false;
         this.searchResults = [];
     }
@@ -735,7 +729,6 @@ export default class Clarity360Dashboard extends NavigationMixin(LightningElemen
     handleSearchInputKeydown(event) {
         if (event.key === 'Enter') {
             event.preventDefault();
-            window.clearTimeout(this.searchSuggestionTimer);
             this.openSearchResults();
         }
     }
@@ -771,7 +764,7 @@ export default class Clarity360Dashboard extends NavigationMixin(LightningElemen
             this.assistantAvailable = state?.available === true;
             this.assistantStatusMessage = state?.message || '';
             this.currentMode = this.assistantAvailable ? 'AI' : 'Standard';
-        } catch (error) {
+        } catch {
             this.assistantAvailable = false;
             this.currentMode = 'Standard';
             this.assistantStatusMessage = 'Agentforce status could not be determined.';
@@ -1168,7 +1161,7 @@ export default class Clarity360Dashboard extends NavigationMixin(LightningElemen
         try {
             window.sessionStorage.setItem(`clarity360.setup.overrideStep.${window.location.hostname}`, String(step));
             window.sessionStorage.setItem(`clarity360.setup.currentStep.${window.location.hostname}`, String(step));
-        } catch (error) {
+        } catch {
             // Ignore storage access failures in restricted browsing contexts.
         }
     }
@@ -1660,7 +1653,7 @@ export default class Clarity360Dashboard extends NavigationMixin(LightningElemen
                 month: 'short',
                 day: '2-digit'
             }).format(new Date(value));
-        } catch (error) {
+        } catch {
             return String(value);
         }
     }
