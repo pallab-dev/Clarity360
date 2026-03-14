@@ -122,30 +122,45 @@ jobs:
       - name: Install Salesforce CLI
         run: npm install -g @salesforce/cli
 
-      - name: Validate required test org secret
-        run: test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
+      - name: Validate required Dev Hub secret
+        run: test -n "${{ secrets.DEVHUB_SFDX_URL }}" || { echo "Missing DEVHUB_SFDX_URL"; exit 1; }
 
-      - name: Write Testing Org auth URL to file
-        run: echo "${{ secrets.TESTORG_SFDX_URL }}" > testorg.sfdx-url
+      - name: Write Dev Hub auth URL to file
+        run: echo "${{ secrets.DEVHUB_SFDX_URL }}" > devhub.sfdx-url
 
-      - name: Authenticate Testing Org via sfdx-url
+      - name: Authenticate Dev Hub via sfdx-url
         run: |
           sf org login sfdx-url \
-            --sfdx-url-file testorg.sfdx-url \
-            --alias testorg
+            --sfdx-url-file devhub.sfdx-url \
+            --set-default-dev-hub \
+            --alias devhub
 
-      - name: Validate metadata deployment to Testing Org
+      - name: Create scratch org
+        run: |
+          sf org create scratch \
+            --target-dev-hub devhub \
+            --definition-file config/project-scratch-def.json \
+            --alias ci-scratch \
+            --duration-days 1 \
+            --set-default \
+            --wait 30
+
+      - name: Validate metadata deployment to scratch org
         run: |
           sf project deploy start \
-            --target-org testorg \
+            --target-org ci-scratch \
             --source-dir force-app/main/default \
             --ignore-conflicts \
             --dry-run \
             --wait 30
 
+      - name: Delete scratch org
+        if: always()
+        run: sf org delete scratch --target-org ci-scratch --no-prompt || true
+
       - name: Clean up auth file
         if: always()
-        run: rm -f testorg.sfdx-url
+        run: rm -f devhub.sfdx-url
 
   appexchange-review:
     name: AppExchange Review
@@ -174,14 +189,13 @@ jobs:
       - name: Run AppExchange security review scan
         run: |
           sf code-analyzer run \
-            --workspace force-app/main/default \
             --rule-selector AppExchange \
             --rule-selector Recommended:Security \
             --severity-threshold 2 \
             --view detail
 
-  deploy-test-source-for-tests:
-    name: Deploy Test Source
+  scratch-source-deploy:
+    name: Scratch Deploy
     runs-on: ubuntu-latest
     needs:
       - appexchange-review
@@ -194,89 +208,165 @@ jobs:
       - name: Install Salesforce CLI
         run: npm install -g @salesforce/cli
 
-      - name: Validate required test org secret
-        run: test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
+      - name: Validate required Dev Hub secret
+        run: test -n "${{ secrets.DEVHUB_SFDX_URL }}" || { echo "Missing DEVHUB_SFDX_URL"; exit 1; }
 
-      - name: Write Testing Org auth URL to file
-        run: echo "${{ secrets.TESTORG_SFDX_URL }}" > testorg.sfdx-url
+      - name: Write Dev Hub auth URL to file
+        run: echo "${{ secrets.DEVHUB_SFDX_URL }}" > devhub.sfdx-url
 
-      - name: Authenticate Testing Org via sfdx-url
+      - name: Authenticate Dev Hub via sfdx-url
         run: |
           sf org login sfdx-url \
-            --sfdx-url-file testorg.sfdx-url \
-            --alias testorg
+            --sfdx-url-file devhub.sfdx-url \
+            --set-default-dev-hub \
+            --alias devhub
 
-      - name: Deploy source to Testing Org for Apex validation
+      - name: Create scratch org
+        run: |
+          sf org create scratch \
+            --target-dev-hub devhub \
+            --definition-file config/project-scratch-def.json \
+            --alias ci-scratch \
+            --duration-days 1 \
+            --set-default \
+            --wait 30
+
+      - name: Deploy source to scratch org
         run: |
           sf project deploy start \
-            --target-org testorg \
+            --target-org ci-scratch \
             --source-dir force-app/main/default \
             --ignore-conflicts \
             --wait 30
 
+      - name: Delete scratch org
+        if: always()
+        run: sf org delete scratch --target-org ci-scratch --no-prompt || true
+
       - name: Clean up auth file
         if: always()
-        run: rm -f testorg.sfdx-url
+        run: rm -f devhub.sfdx-url
 
-  apex-tests:
+  scratch-apex-tests:
     name: Apex Tests
     runs-on: ubuntu-latest
-    needs: deploy-test-source-for-tests
+    needs: scratch-source-deploy
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Install Salesforce CLI
         run: npm install -g @salesforce/cli
 
-      - name: Validate required test org secret
-        run: test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
+      - name: Validate required Dev Hub secret
+        run: test -n "${{ secrets.DEVHUB_SFDX_URL }}" || { echo "Missing DEVHUB_SFDX_URL"; exit 1; }
 
-      - name: Write Testing Org auth URL to file
-        run: echo "${{ secrets.TESTORG_SFDX_URL }}" > testorg.sfdx-url
+      - name: Write Dev Hub auth URL to file
+        run: echo "${{ secrets.DEVHUB_SFDX_URL }}" > devhub.sfdx-url
 
-      - name: Authenticate Testing Org via sfdx-url
+      - name: Authenticate Dev Hub via sfdx-url
         run: |
           sf org login sfdx-url \
-            --sfdx-url-file testorg.sfdx-url \
-            --alias testorg
+            --sfdx-url-file devhub.sfdx-url \
+            --set-default-dev-hub \
+            --alias devhub
 
-      - name: Run Apex tests with coverage
+      - name: Create scratch org
+        run: |
+          sf org create scratch \
+            --target-dev-hub devhub \
+            --definition-file config/project-scratch-def.json \
+            --alias ci-scratch \
+            --duration-days 1 \
+            --set-default \
+            --wait 30
+
+      - name: Deploy source to scratch org
+        run: |
+          sf project deploy start \
+            --target-org ci-scratch \
+            --source-dir force-app/main/default \
+            --ignore-conflicts \
+            --wait 30
+
+      - name: Run Apex tests in scratch org
         run: |
           sf apex run test \
-            --target-org testorg \
+            --target-org ci-scratch \
             --test-level RunLocalTests \
             --code-coverage \
             --result-format human \
             --wait 30
 
+      - name: Delete scratch org
+        if: always()
+        run: sf org delete scratch --target-org ci-scratch --no-prompt || true
+
       - name: Clean up auth file
         if: always()
-        run: rm -f testorg.sfdx-url
+        run: rm -f devhub.sfdx-url
 
-  apex-coverage:
+  scratch-apex-coverage:
     name: Apex Coverage
     runs-on: ubuntu-latest
-    needs: apex-tests
+    needs: scratch-apex-tests
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Install Salesforce CLI
         run: npm install -g @salesforce/cli
 
-      - name: Validate required test org secret
-        run: test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
+      - name: Validate required Dev Hub secret
+        run: test -n "${{ secrets.DEVHUB_SFDX_URL }}" || { echo "Missing DEVHUB_SFDX_URL"; exit 1; }
 
-      - name: Write Testing Org auth URL to file
-        run: echo "${{ secrets.TESTORG_SFDX_URL }}" > testorg.sfdx-url
+      - name: Write Dev Hub auth URL to file
+        run: echo "${{ secrets.DEVHUB_SFDX_URL }}" > devhub.sfdx-url
 
-      - name: Authenticate Testing Org via sfdx-url
+      - name: Authenticate Dev Hub via sfdx-url
         run: |
           sf org login sfdx-url \
-            --sfdx-url-file testorg.sfdx-url \
-            --alias testorg
+            --sfdx-url-file devhub.sfdx-url \
+            --set-default-dev-hub \
+            --alias devhub
 
-      - name: Verify org-wide Apex coverage
+      - name: Create scratch org
+        run: |
+          sf org create scratch \
+            --target-dev-hub devhub \
+            --definition-file config/project-scratch-def.json \
+            --alias ci-scratch \
+            --duration-days 1 \
+            --set-default \
+            --wait 30
+
+      - name: Deploy source to scratch org
+        run: |
+          sf project deploy start \
+            --target-org ci-scratch \
+            --source-dir force-app/main/default \
+            --ignore-conflicts \
+            --wait 30
+
+      - name: Run Apex tests in scratch org for coverage
+        run: |
+          sf apex run test \
+            --target-org ci-scratch \
+            --test-level RunLocalTests \
+            --code-coverage \
+            --result-format human \
+            --wait 30
+
+      - name: Verify org-wide Apex coverage in scratch org
         run: |
           ORG_COVERAGE_JSON=$(sf data query \
             --use-tooling-api \
             --json \
-            --target-org testorg \
+            --target-org ci-scratch \
             --query "SELECT PercentCovered FROM ApexOrgWideCoverage")
           ORG_COVERAGE_PCT=$(echo "$ORG_COVERAGE_JSON" | jq -r '.result.records[0].PercentCovered // empty')
           if [ -z "$ORG_COVERAGE_PCT" ]; then
@@ -288,14 +378,18 @@ jobs:
             exit 1
           fi
 
+      - name: Delete scratch org
+        if: always()
+        run: sf org delete scratch --target-org ci-scratch --no-prompt || true
+
       - name: Clean up auth file
         if: always()
-        run: rm -f testorg.sfdx-url
+        run: rm -f devhub.sfdx-url
 
   deploy-testorg:
     name: Deploy To Testing Org
     runs-on: ubuntu-latest
-    needs: apex-coverage
+    needs: scratch-apex-coverage
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
