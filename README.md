@@ -106,7 +106,7 @@ Both pipelines now expose the quality checks as separate GitHub Actions jobs. Pu
 4. XML validation using `xmllint` across `force-app` and `manifest`. Any malformed XML fails the `XML Validation` job.
 5. Metadata validation using `sf project deploy start --dry-run` in the shared Testing Org. This catches deploy-time metadata and configuration issues before the merge is allowed.
 6. Changed Apex coverage validation using `sf project deploy start --dry-run --test-level RunSpecifiedTests` against the shared Testing Org. When a pull request changes non-test Apex classes or triggers, the workflow validates those changed members with specified tests so each changed class or trigger must meet the 75% requirement individually.
-7. Full-package regression validation using `sf project deploy start --dry-run --test-level RunLocalTests` against the shared Testing Org. This validates the incoming metadata against the current org state and reruns the local test suite before merge.
+7. Full-package regression validation in the shared Testing Org. The workflow runs a metadata dry-run with `NoTestRun`, then runs `RunLocalTests` separately and compares org-wide coverage before and after. Changed Apex must still meet 75% individually, and shared-org overall coverage is enforced as a non-regression gate until the org baseline reaches 75% or higher.
 8. AppExchange PMD review scanning using `sf scanner run --engine pmd-appexchange` with severity threshold `2`.
 
 The final pull request checks remain `release-pipeline` and `production-pipeline`. Those jobs only pass when all upstream validation jobs succeed.
@@ -117,7 +117,7 @@ Salesforce AppExchange security review is a one-time review unless the package i
 
 Current temporary exception: the production workflow promotes the package version but skips PBO installation and post-install smoke tests until a PBO org is available and `PBOORG_SFDX_URL` is configured.
 
-Current temporary exception: scratch-org validation is disabled to avoid daily Dev Hub signup exhaustion. Pull requests validate against the shared Testing Org with both changed-Apex coverage checks and full-package dry-run validation. Merged pull requests deploy source directly to the Testing Org. Package creation remains a production concern.
+Current temporary exception: scratch-org validation is disabled to avoid daily Dev Hub signup exhaustion. Pull requests validate against the shared Testing Org with both changed-Apex coverage checks and full-package dry-run validation. Merged pull requests deploy source directly to the Testing Org, then run a dedicated smoke suite. Package creation remains a production concern.
 
 ## Pipeline flow diagram
 
