@@ -5,6 +5,10 @@ on:
     branches:
       - 'release/**'
 
+concurrency:
+  group: release-pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   pmd-scan:
     name: PMD Scan

@@ -5,6 +5,10 @@ on:
     branches:
       - production
 
+concurrency:
+  group: production-pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   pmd-scan:
     name: PMD Scan
