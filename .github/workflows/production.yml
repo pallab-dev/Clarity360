@@ -178,8 +178,8 @@ jobs:
             --format table \
             --verbose-violations
 
-  scratch-validation:
-    name: Scratch Validation
+  testorg-validation:
+    name: Testing Org Validation
     runs-on: ubuntu-latest
     needs: appexchange-review
     if: github.event_name == 'pull_request'
@@ -192,79 +192,74 @@ jobs:
       - name: Install Salesforce CLI
         run: npm install -g @salesforce/cli
 
-      - name: Validate required Dev Hub secret
-        run: test -n "${{ secrets.DEVHUB_SFDX_URL }}" || { echo "Missing DEVHUB_SFDX_URL"; exit 1; }
+      - name: Detect changed Apex members
+        run: |
+          mkdir -p .ci
+          git fetch --no-tags origin "${{ github.event.pull_request.base.ref }}"
+          git diff --name-only "origin/${{ github.event.pull_request.base.ref }}...HEAD" \
+            -- 'force-app/main/default/classes/*.cls' \
+            -- 'force-app/main/default/triggers/*.trigger' > .ci/changed-apex-all.txt
+          grep -Ev 'Test\.cls$' .ci/changed-apex-all.txt > .ci/changed-apex-members.txt || true
+          find force-app/main/default/classes -name '*Test.cls' -print \
+            | sed 's#force-app/main/default/classes/##' \
+            | sed 's#\.cls$##' \
+            | sort > .ci/local-test-classes.txt
+          echo "Changed Apex members:"
+          cat .ci/changed-apex-members.txt || true
 
-      - name: Write Dev Hub auth URL to file
-        run: echo "${{ secrets.DEVHUB_SFDX_URL }}" > devhub.sfdx-url
+      - name: Validate required test org secret
+        run: test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
 
-      - name: Authenticate Dev Hub via sfdx-url
+      - name: Write Testing Org auth URL to file
+        run: echo "${{ secrets.TESTORG_SFDX_URL }}" > testorg.sfdx-url
+
+      - name: Authenticate Testing Org via sfdx-url
         run: |
           sf org login sfdx-url \
-            --sfdx-url-file devhub.sfdx-url \
-            --set-default-dev-hub \
-            --alias devhub
+            --sfdx-url-file testorg.sfdx-url \
+            --alias testorg
 
-      - name: Create scratch org
+      - name: Validate changed Apex member coverage
         run: |
-          sf org create scratch \
-            --target-dev-hub devhub \
-            --definition-file config/project-scratch-def.json \
-            --alias ci-scratch \
-            --duration-days 1 \
-            --set-default \
+          if [ ! -s .ci/changed-apex-members.txt ]; then
+            echo "No changed non-test Apex classes or triggers detected."
+            exit 0
+          fi
+          SOURCE_ARGS=""
+          while IFS= read -r member; do
+            SOURCE_ARGS="$SOURCE_ARGS --source-dir $member"
+          done < .ci/changed-apex-members.txt
+          TEST_ARGS=""
+          while IFS= read -r test_class; do
+            TEST_ARGS="$TEST_ARGS --tests $test_class"
+          done < .ci/local-test-classes.txt
+          # RunSpecifiedTests enforces 75% coverage on each class/trigger in the deployment package.
+          eval sf project deploy start \
+            --target-org testorg \
+            $SOURCE_ARGS \
+            --ignore-conflicts \
+            --dry-run \
+            --test-level RunSpecifiedTests \
+            $TEST_ARGS \
+            --coverage-formatters text-summary \
+            --results-dir changed-apex-validation \
             --wait 30
 
-      - name: Validate metadata deployment to scratch org
+      - name: Validate full package deployment in Testing Org
         run: |
           sf project deploy start \
-            --target-org ci-scratch \
+            --target-org testorg \
             --source-dir force-app/main/default \
             --ignore-conflicts \
             --dry-run \
-            --wait 30
-
-      - name: Deploy source to scratch org
-        run: |
-          sf project deploy start \
-            --target-org ci-scratch \
-            --source-dir force-app/main/default \
-            --ignore-conflicts \
-            --wait 30
-
-      - name: Run Apex tests in scratch org for coverage
-        run: |
-          sf apex run test \
-            --target-org ci-scratch \
             --test-level RunLocalTests \
-            --code-coverage \
-            --result-format human \
+            --coverage-formatters text-summary \
+            --results-dir full-package-validation \
             --wait 30
-
-      - name: Verify org-wide Apex coverage in scratch org
-        run: |
-          ORG_COVERAGE_JSON=$(sf data query \
-            --use-tooling-api \
-            --json \
-            --target-org ci-scratch \
-            --query "SELECT PercentCovered FROM ApexOrgWideCoverage")
-          ORG_COVERAGE_PCT=$(echo "$ORG_COVERAGE_JSON" | jq -r '.result.records[0].PercentCovered // empty')
-          if [ -z "$ORG_COVERAGE_PCT" ]; then
-            echo "Unable to determine org-wide Apex coverage from tooling query."
-            exit 1
-          fi
-          if ! awk "BEGIN {exit !($ORG_COVERAGE_PCT >= 75)}"; then
-            echo "Org-wide Apex coverage is below 75%: ${ORG_COVERAGE_PCT}%"
-            exit 1
-          fi
-
-      - name: Delete scratch org
-        if: always()
-        run: sf org delete scratch --target-org ci-scratch --no-prompt || true
 
       - name: Clean up auth file
         if: always()
-        run: rm -f devhub.sfdx-url
+        run: rm -f testorg.sfdx-url
 
   verify-production-merge:
     name: Verify Production Merge
@@ -368,7 +363,7 @@ jobs:
   production-pipeline:
     name: production-pipeline
     runs-on: ubuntu-latest
-    needs: scratch-validation
+    needs: testorg-validation
     if: github.event_name == 'pull_request'
     steps:
       - name: Mark production pipeline successful
