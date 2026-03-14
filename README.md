@@ -22,16 +22,16 @@ The repository uses exactly 3 branch types:
 
 - One release branch is used per sprint or iteration.
 - A new `release/N` branch is cut from the previous `release/N-1` branch at the start of each sprint.
-- Pull requests targeting `release/N` trigger the `release-pipeline` validation workflow automatically.
-- Merged pull requests into `release/N` trigger deployment to the Testing Org.
+- Pull requests targeting `release/N` trigger the `Release Validation` workflow automatically.
+- Merged pull requests into `release/N` trigger the `Release Deploy` workflow, which deploys to the Testing Org only after successful PR validation.
 - `release/N` is never merged directly. When the sprint is ready to ship, a pull request is raised from `release/N` to `production`.
 
 ### `production`
 
 - `production` is the permanent protected branch.
 - It only receives pull requests from `release/N` branches.
-- Pull requests targeting `production` trigger the `production-pipeline` validation workflow automatically.
-- Merged pull requests into `production` trigger package promotion and release tagging.
+- Pull requests targeting `production` trigger the `Production Validation` workflow automatically.
+- Merged pull requests into `production` trigger the `Production Release` workflow for package promotion and release tagging.
 - No developer pushes directly to this branch.
 
 ## Developer workflow
@@ -98,7 +98,7 @@ Add these secrets in GitHub Settings -> Secrets -> Actions.
 
 ## Quality gates
 
-Both pipelines now expose the quality checks as separate GitHub Actions jobs. Pull requests run the validation path against the shared Testing Org. Pushes to `release/*` or `production` only run the post-merge deployment or promotion path after a merged-pull-request check passes.
+Both pipelines now expose the quality checks as separate GitHub Actions jobs. Pull requests run the validation path against the shared Testing Org. Separate merged-PR workflows run the release deployment and production release paths only after a successful validation run has been found for that pull request.
 
 1. PMD static analysis using `sf scanner run` against all Apex classes and triggers in the package. Any severity 1 or 2 violation fails the `PMD Scan` job.
 2. ESLint for LWC and Aura using `npm run lint` against `./force-app/**/*.js`. Any ESLint error fails the `ESLint` job. Warnings are allowed.
@@ -111,7 +111,7 @@ Both pipelines now expose the quality checks as separate GitHub Actions jobs. Pu
 
 The final pull request checks remain `release-pipeline` and `production-pipeline`. Those jobs only pass when all upstream validation jobs succeed.
 
-Merged-branch deployment and promotion paths also re-check that the associated pull request validation workflow concluded successfully before any deployment or promotion step starts.
+Merged-PR deployment and promotion workflows also re-check that the associated pull request validation workflow concluded successfully before any deployment or promotion step starts.
 
 ## AppExchange Security Review policy
 
@@ -124,19 +124,32 @@ Current temporary exception: scratch-org validation is disabled to avoid daily D
 ## Pipeline flow diagram
 
 ```text
-feature/* ──PR──► release/N ──auto──► [PMD] [ESLint] [Security] [Apex Tests]
-                                                           \    |    /
-                                                            [Build beta pkg]
-                                                                   │
-                                                          [Deploy Testing Org]
-                                                                   │
-                                              PR (sprint done) ◄───┘
-                                                 │
-                                              production ──auto──► [PMD] [ESLint] [Security] [Apex Tests]
-                                                                                      \    |    /
-                                                                                  [Promote Released]
-                                                                                         │
-                                                                                [Deploy PBO Org]
-                                                                                         │
-                                                                             [AppExchange listing]
+feature/* ──PR──► release/N ──auto──► [Release Validation]
+                                          │
+                                          ├─ PMD
+                                          ├─ ESLint
+                                          ├─ Security
+                                          ├─ XML
+                                          ├─ Metadata
+                                          ├─ AppExchange
+                                          └─ Testing Org Validation
+                                          │
+                               merge PR ──┴──► [Release Deploy]
+                                                     │
+                                            [Deploy Testing Org]
+                                                     │
+                                            [Post-Deploy Smoke Test]
+                                                     │
+                                     PR (sprint done)◄──────────────┘
+                                              │
+                                              ▼
+                                         production ──PR──► [Production Validation]
+                                                              │
+                                                              └─ same validation gates
+                                                                      │
+                                                           merge PR ──┴──► [Production Release]
+                                                                                 │
+                                                                         [Promote Released]
+                                                                                 │
+                                                                          [Create Release Tag]
 ```

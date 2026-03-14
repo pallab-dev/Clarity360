@@ -1,27 +1,23 @@
-name: Production Pipeline
+name: Release Validation
 
 on:
   pull_request:
     branches:
-      - production
+      - 'release/**'
     types:
       - opened
       - synchronize
       - reopened
       - ready_for_review
-  push:
-    branches:
-      - production
 
 concurrency:
-  group: production-pipeline-${{ github.ref }}
+  group: release-validation-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   pmd-scan:
     name: PMD Scan
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -56,7 +52,6 @@ jobs:
     name: ESLint
     runs-on: ubuntu-latest
     needs: pmd-scan
-    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -78,7 +73,6 @@ jobs:
     name: Security Scan
     runs-on: ubuntu-latest
     needs: eslint-scan
-    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -112,7 +106,6 @@ jobs:
     name: XML Validation
     runs-on: ubuntu-latest
     needs: security-scan
-    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -129,7 +122,6 @@ jobs:
     name: Metadata Validation
     runs-on: ubuntu-latest
     needs: xml-validation
-    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -148,7 +140,6 @@ jobs:
     name: AppExchange Review
     runs-on: ubuntu-latest
     needs: metadata-validation
-    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -182,7 +173,6 @@ jobs:
     name: Testing Org Validation
     runs-on: ubuntu-latest
     needs: appexchange-review
-    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -254,7 +244,6 @@ jobs:
           while IFS= read -r test_class; do
             TEST_ARGS+=(--tests "$test_class")
           done < .ci/local-test-classes.txt
-          # RunSpecifiedTests enforces 75% coverage on each class/trigger in the deployment package.
           sf project deploy start \
             --target-org testorg \
             "${SOURCE_ARGS[@]}" \
@@ -278,6 +267,7 @@ jobs:
 
       - name: Run full local Apex tests in Testing Org
         run: |
+          mkdir -p full-package-validation
           sf apex run test \
             --target-org testorg \
             --test-level RunLocalTests \
@@ -315,148 +305,10 @@ jobs:
         if: always()
         run: rm -f testorg.sfdx-url
 
-  verify-production-merge:
-    name: Verify Production Merge
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-    permissions:
-      actions: read
-      pull-requests: read
-    steps:
-      - name: Verify push commit is associated with a pull request
-        uses: actions/github-script@v7
-        with:
-          script: |
-            let mergedPullNumber;
-            const response = await github.rest.repos.listPullRequestsAssociatedWithCommit({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              commit_sha: context.sha,
-            });
-            let mergedPull = response.data.find((pull) => pull.merged_at);
-            if (!mergedPull) {
-              const commitMessage = context.payload.head_commit?.message || '';
-              const prMatch = commitMessage.match(/\(#(\d+)\)$/m);
-              if (prMatch) {
-                const fallbackPull = await github.rest.pulls.get({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: Number(prMatch[1]),
-                });
-                if (fallbackPull.data.merged_at) {
-                  mergedPull = fallbackPull.data;
-                }
-              }
-            }
-            if (!mergedPull) {
-              core.setFailed('Direct pushes to production are not allowed. Merge through a pull request.');
-              return;
-            }
-            mergedPullNumber = mergedPull.number;
-
-            const runsResponse = await github.rest.actions.listWorkflowRunsForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              event: 'pull_request',
-              per_page: 100,
-            });
-            const validationRun = runsResponse.data.workflow_runs.find((run) =>
-              run.name === context.workflow &&
-              run.head_sha === mergedPull.head.sha &&
-              run.conclusion === 'success'
-            );
-            if (!validationRun) {
-              core.setFailed(`PR validation must succeed before deployment. No successful ${context.workflow} pull_request run was found for PR #${mergedPullNumber}.`);
-            }
-
-  promote-package:
-    name: Promote Package
-    runs-on: ubuntu-latest
-    needs: verify-production-merge
-    if: github.event_name == 'push'
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install Salesforce CLI
-        run: npm install -g @salesforce/cli
-
-      - name: Validate promotion prerequisites
-        run: |
-          if [ ! -f .version-id ]; then
-            echo ".version-id is not present. Package promotion is skipped."
-            exit 0
-          fi
-          test -n "${{ secrets.DEVHUB_SFDX_URL }}" || { echo "Missing DEVHUB_SFDX_URL"; exit 1; }
-
-      - name: Write Dev Hub auth URL to file
-        if: ${{ hashFiles('.version-id') != '' }}
-        run: echo "${{ secrets.DEVHUB_SFDX_URL }}" > devhub.sfdx-url
-
-      - name: Authenticate Dev Hub via sfdx-url
-        if: ${{ hashFiles('.version-id') != '' }}
-        run: |
-          sf org login sfdx-url \
-            --sfdx-url-file devhub.sfdx-url \
-            --set-default-dev-hub \
-            --alias devhub
-
-      - name: Read beta version ID from .version-id file
-        if: ${{ hashFiles('.version-id') != '' }}
-        id: ver
-        run: echo "VERSION_ID=$(cat .version-id)" >> "$GITHUB_OUTPUT"
-
-      - name: Promote package version from Beta to Released
-        if: ${{ hashFiles('.version-id') != '' }}
-        run: |
-          sf package version promote \
-            --package ${{ steps.ver.outputs.VERSION_ID }} \
-            --no-prompt
-
-      - name: Clean up auth file
-        if: always()
-        run: rm -f devhub.sfdx-url
-
-  create-release-tag:
-    name: Create Release Tag
-    runs-on: ubuntu-latest
-    needs: promote-package
-    if: github.event_name == 'push'
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Skip release tag when no version exists
-        if: ${{ hashFiles('.version-id') == '' }}
-        run: echo ".version-id is not present. Release tag creation is skipped."
-
-      - name: Create a production Git release tag
-        if: ${{ hashFiles('.version-id') != '' }}
-        run: |
-          TAG="release-$(date +%Y%m%d%H%M%S)"
-          git tag "$TAG"
-          git push origin "$TAG"
-
-  production-pipeline:
-    name: production-pipeline
+  release-pipeline:
+    name: release-pipeline
     runs-on: ubuntu-latest
     needs: testorg-validation
-    if: github.event_name == 'pull_request'
     steps:
-      - name: Mark production pipeline successful
-        run: echo "Production pull request validation completed successfully."
-
-  production-release:
-    name: Production Release
-    runs-on: ubuntu-latest
-    needs: create-release-tag
-    if: github.event_name == 'push'
-    steps:
-      - name: Mark production release successful
-        run: echo "Production release steps completed successfully."
+      - name: Mark release pipeline successful
+        run: echo "Release pull request validation completed successfully."
