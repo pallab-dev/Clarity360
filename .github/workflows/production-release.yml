@@ -1,0 +1,146 @@
+name: Production Release
+
+on:
+  pull_request_target:
+    branches:
+      - production
+    types:
+      - closed
+
+concurrency:
+  group: production-release-${{ github.event.pull_request.base.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-production-merge:
+    name: Verify Production Merge
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
+    permissions:
+      actions: read
+      pull-requests: read
+    outputs:
+      merge_sha: ${{ steps.verify.outputs.merge_sha }}
+    steps:
+      - name: Verify production PR validation succeeded
+        id: verify
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pull = context.payload.pull_request;
+            if (!pull || !pull.merged) {
+              core.setFailed('Only merged pull requests can trigger production release.');
+              return;
+            }
+
+            const mergedBy = pull.merged_by?.login;
+            if (mergedBy !== 'pallab-dev') {
+              core.setFailed(`Production release is blocked because PR #${pull.number} was merged by ${mergedBy || 'an unknown user'}, not pallab-dev.`);
+              return;
+            }
+
+            const runsResponse = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'production-validation.yml',
+              event: 'pull_request',
+              per_page: 100,
+            });
+
+            const validationRun = runsResponse.data.workflow_runs.find((run) =>
+              run.head_sha === pull.head.sha && run.conclusion === 'success'
+            );
+
+            if (!validationRun) {
+              core.setFailed(`Production release is blocked because PR validation did not succeed for PR #${pull.number}.`);
+              return;
+            }
+
+            core.setOutput('merge_sha', pull.merge_commit_sha || context.sha);
+
+  promote-package:
+    name: Promote Package
+    runs-on: ubuntu-latest
+    needs: verify-production-merge
+    if: github.event.pull_request.merged == true
+    steps:
+      - name: Checkout merged production content
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.verify-production-merge.outputs.merge_sha }}
+
+      - name: Install Salesforce CLI
+        run: npm install -g @salesforce/cli
+
+      - name: Validate promotion prerequisites
+        run: |
+          if [ ! -f .version-id ]; then
+            echo ".version-id is not present. Package promotion is skipped."
+            exit 0
+          fi
+          test -n "${{ secrets.DEVHUB_SFDX_URL }}" || { echo "Missing DEVHUB_SFDX_URL"; exit 1; }
+
+      - name: Write Dev Hub auth URL to file
+        if: ${{ hashFiles('.version-id') != '' }}
+        run: echo "${{ secrets.DEVHUB_SFDX_URL }}" > devhub.sfdx-url
+
+      - name: Authenticate Dev Hub via sfdx-url
+        if: ${{ hashFiles('.version-id') != '' }}
+        run: |
+          sf org login sfdx-url \
+            --sfdx-url-file devhub.sfdx-url \
+            --set-default-dev-hub \
+            --alias devhub
+
+      - name: Read beta version ID from .version-id file
+        if: ${{ hashFiles('.version-id') != '' }}
+        id: ver
+        run: echo "VERSION_ID=$(cat .version-id)" >> "$GITHUB_OUTPUT"
+
+      - name: Promote package version from Beta to Released
+        if: ${{ hashFiles('.version-id') != '' }}
+        run: |
+          sf package version promote \
+            --package ${{ steps.ver.outputs.VERSION_ID }} \
+            --no-prompt
+
+      - name: Clean up auth file
+        if: always()
+        run: rm -f devhub.sfdx-url
+
+  create-release-tag:
+    name: Create Release Tag
+    runs-on: ubuntu-latest
+    needs:
+      - verify-production-merge
+      - promote-package
+    if: github.event.pull_request.merged == true
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout merged production content
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.verify-production-merge.outputs.merge_sha }}
+
+      - name: Skip release tag when no version exists
+        if: ${{ hashFiles('.version-id') == '' }}
+        run: echo ".version-id is not present. Release tag creation is skipped."
+
+      - name: Create a production Git release tag
+        if: ${{ hashFiles('.version-id') != '' }}
+        run: |
+          TAG="release-$(date +%Y%m%d%H%M%S)"
+          git tag "$TAG"
+          git push origin "$TAG"
+
+  production-release:
+    name: Production Release
+    runs-on: ubuntu-latest
+    needs: create-release-tag
+    if: github.event.pull_request.merged == true
+    steps:
+      - name: Mark production release successful
+        run: echo "Production release steps completed successfully."
