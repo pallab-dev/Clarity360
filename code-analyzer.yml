@@ -1,5 +1,0 @@
-engines:
-  eslint:
-    disable_engine: true
-  pmd:
-    disable_engine: true
