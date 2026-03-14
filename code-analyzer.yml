@@ -1,0 +1,6 @@
+config_root: .
+engines:
+  eslint:
+    eslint_config_file: eslint.config.js
+  pmd:
+    disable_engine: true
