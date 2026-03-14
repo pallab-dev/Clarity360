@@ -92,7 +92,7 @@ Both pipelines now expose the quality checks as separate GitHub Actions jobs so 
 4. XML validation using `xmllint` across `force-app` and `manifest`. Any malformed XML fails the `XML Validation` job.
 5. Metadata validation using `sf project deploy start --dry-run` against `testorg`. This catches deploy-time metadata and configuration issues before the actual release deployment.
 6. Apex unit tests with code coverage using `sf apex run test` against `testorg`. When non-test Apex classes or triggers change, the workflow deploys the current source to `testorg`, runs local tests, requires org-wide Apex coverage to remain at or above 75%, and also requires every changed non-test Apex class or trigger to have at least 75% aggregate coverage. Any failure fails the `Apex Tests` job.
-7. AppExchange report generation using Salesforce Code Analyzer v5 with `AppExchange` and `Recommended:Security` selectors. The report is uploaded as an artifact for packaging and listing review.
+7. AppExchange report generation using Salesforce Code Analyzer v5 with `AppExchange` and `Recommended:Security` selectors and severity threshold `2`. The job logs findings directly in CI and also uploads the HTML report artifact for packaging and listing review.
 
 The final branch protection checks remain `release-pipeline` and `production-pipeline`. Those jobs only pass when all upstream quality gate jobs and any eligible package actions complete successfully.
 
