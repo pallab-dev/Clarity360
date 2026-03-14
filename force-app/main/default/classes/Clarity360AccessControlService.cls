@@ -60,7 +60,7 @@ public with sharing class Clarity360AccessControlService {
             return new List<SObject>();
         }
         if (Test.isRunningTest()) {
-            return records.deepClone(true, true, true, true);
+            return cloneRecords(records);
         }
         return Security.stripInaccessible(AccessType.READABLE, records).getRecords();
     }
@@ -75,7 +75,7 @@ public with sharing class Clarity360AccessControlService {
             return new List<SObject>();
         }
         if (Test.isRunningTest()) {
-            return records.deepClone(true, true, true, true);
+            return cloneRecords(records);
         }
 
         List<SObject> inserts = new List<SObject>();
@@ -108,5 +108,13 @@ public with sharing class Clarity360AccessControlService {
      */
     public static Clarity360AccessControlService get() {
         return new Clarity360AccessControlService();
+    }
+
+    private static List<SObject> cloneRecords(List<SObject> records) {
+        List<SObject> clones = new List<SObject>();
+        for (SObject recordRow : records) {
+            clones.add(recordRow == null ? null : recordRow.clone(true, true, true, true));
+        }
+        return clones;
     }
 }

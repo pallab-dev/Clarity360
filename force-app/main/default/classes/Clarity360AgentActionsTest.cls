@@ -212,7 +212,7 @@ private class Clarity360AgentActionsTest {
 
     @IsTest
     static void getRecentScanSummaryReturnsNoDataWhenLookbackExcludesJobs() {
-        insert new ScanJob__c(
+        ScanJob__c oldJob = new ScanJob__c(
             JobType__c = 'Usage Scan',
             Status__c = 'Completed',
             StartedOn__c = System.now().addDays(-15),
@@ -220,12 +220,7 @@ private class Clarity360AgentActionsTest {
             ScopeSummary__c = 'Old run',
             ProgressPct__c = 100
         );
-        ScanJob__c oldJob = [
-            SELECT Id
-            FROM ScanJob__c
-            WHERE ScopeSummary__c = 'Old run'
-            LIMIT 1
-        ];
+        insert oldJob;
         Test.setCreatedDate(oldJob.Id, System.now().addDays(-15));
 
         Clarity360AgentActions.GetRecentScanSummaryRequest request =
