@@ -183,16 +183,17 @@ jobs:
       - name: Install Salesforce CLI
         run: npm install -g @salesforce/cli
 
-      - name: Install Salesforce Code Analyzer v5
-        run: sf plugins install code-analyzer
+      - name: Install Salesforce Scanner plugin
+        run: sf plugins install @salesforce/sfdx-scanner
 
-      - name: Run AppExchange security review scan
+      - name: Run AppExchange PMD review scan
         run: |
-          sf code-analyzer run \
-            --rule-selector AppExchange \
-            --rule-selector Recommended:Security \
+          sf scanner run \
+            --engine pmd-appexchange \
+            --target "./" \
             --severity-threshold 2 \
-            --view detail
+            --format table \
+            --verbose-violations
 
   scratch-source-deploy:
     name: Scratch Deploy
