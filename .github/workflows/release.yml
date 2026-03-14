@@ -143,8 +143,8 @@ jobs:
         if: always()
         run: rm -f testorg.sfdx-url
 
-  appexchange-report:
-    name: AppExchange Report
+  appexchange-review:
+    name: AppExchange Review
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -166,7 +166,7 @@ jobs:
       - name: Install Salesforce Code Analyzer v5
         run: sf plugins install code-analyzer
 
-      - name: Generate AppExchange security review report
+      - name: Run AppExchange security review scan
         run: |
           sf code-analyzer run \
             --config-file code-analyzer.yml \
@@ -174,16 +174,7 @@ jobs:
             --rule-selector AppExchange \
             --rule-selector Recommended:Security \
             --severity-threshold 2 \
-            --view detail \
-            --output-file CodeAnalyzer.html
-
-      - name: Upload AppExchange report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: appexchange-code-analyzer-report
-          path: CodeAnalyzer.html
-          if-no-files-found: ignore
+            --view detail
 
   deploy-test-source-for-tests:
     name: Deploy Test Source
@@ -194,7 +185,7 @@ jobs:
       - security-scan
       - xml-validation
       - metadata-validation
-      - appexchange-report
+      - appexchange-review
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
