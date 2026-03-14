@@ -1,27 +1,23 @@
-name: Release Pipeline
+name: Production Validation
 
 on:
   pull_request:
     branches:
-      - 'release/**'
+      - production
     types:
       - opened
       - synchronize
       - reopened
       - ready_for_review
-  push:
-    branches:
-      - 'release/**'
 
 concurrency:
-  group: release-pipeline-${{ github.ref }}
+  group: production-validation-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   pmd-scan:
     name: PMD Scan
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -56,7 +52,6 @@ jobs:
     name: ESLint
     runs-on: ubuntu-latest
     needs: pmd-scan
-    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -78,7 +73,6 @@ jobs:
     name: Security Scan
     runs-on: ubuntu-latest
     needs: eslint-scan
-    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -112,7 +106,6 @@ jobs:
     name: XML Validation
     runs-on: ubuntu-latest
     needs: security-scan
-    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -129,7 +122,6 @@ jobs:
     name: Metadata Validation
     runs-on: ubuntu-latest
     needs: xml-validation
-    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -148,7 +140,6 @@ jobs:
     name: AppExchange Review
     runs-on: ubuntu-latest
     needs: metadata-validation
-    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -182,7 +173,6 @@ jobs:
     name: Testing Org Validation
     runs-on: ubuntu-latest
     needs: appexchange-review
-    if: github.event_name == 'pull_request'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -254,7 +244,6 @@ jobs:
           while IFS= read -r test_class; do
             TEST_ARGS+=(--tests "$test_class")
           done < .ci/local-test-classes.txt
-          # RunSpecifiedTests enforces 75% coverage on each class/trigger in the deployment package.
           sf project deploy start \
             --target-org testorg \
             "${SOURCE_ARGS[@]}" \
@@ -278,6 +267,7 @@ jobs:
 
       - name: Run full local Apex tests in Testing Org
         run: |
+          mkdir -p full-package-validation
           sf apex run test \
             --target-org testorg \
             --test-level RunLocalTests \
@@ -315,147 +305,10 @@ jobs:
         if: always()
         run: rm -f testorg.sfdx-url
 
-  verify-release-merge:
-    name: Verify Release Merge
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-    permissions:
-      actions: read
-      pull-requests: read
-    steps:
-      - name: Verify push commit is associated with a pull request
-        uses: actions/github-script@v7
-        with:
-          script: |
-            let mergedPullNumber;
-            const response = await github.rest.repos.listPullRequestsAssociatedWithCommit({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              commit_sha: context.sha,
-            });
-            let mergedPull = response.data.find((pull) => pull.merged_at);
-            if (!mergedPull) {
-              const commitMessage = context.payload.head_commit?.message || '';
-              const prMatch = commitMessage.match(/\(#(\d+)\)$/m);
-              if (prMatch) {
-                const fallbackPull = await github.rest.pulls.get({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: Number(prMatch[1]),
-                });
-                if (fallbackPull.data.merged_at) {
-                  mergedPull = fallbackPull.data;
-                }
-              }
-            }
-            if (!mergedPull) {
-              core.setFailed('Direct pushes to release branches are not allowed. Merge through a pull request.');
-              return;
-            }
-            mergedPullNumber = mergedPull.number;
-
-            const runsResponse = await github.rest.actions.listWorkflowRunsForRepo({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              event: 'pull_request',
-              per_page: 100,
-            });
-            const validationRun = runsResponse.data.workflow_runs.find((run) =>
-              run.name === context.workflow &&
-              run.head_sha === mergedPull.head.sha &&
-              run.conclusion === 'success'
-            );
-            if (!validationRun) {
-              core.setFailed(`PR validation must succeed before deployment. No successful ${context.workflow} pull_request run was found for PR #${mergedPullNumber}.`);
-            }
-
-  deploy-testorg:
-    name: Deploy To Testing Org
-    runs-on: ubuntu-latest
-    needs: verify-release-merge
-    if: github.event_name == 'push'
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install Salesforce CLI
-        run: npm install -g @salesforce/cli
-
-      - name: Validate required test org secret
-        run: test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
-
-      - name: Write Testing Org auth URL to file
-        run: echo "${{ secrets.TESTORG_SFDX_URL }}" > testorg.sfdx-url
-
-      - name: Authenticate Testing Org via sfdx-url
-        run: |
-          sf org login sfdx-url \
-            --sfdx-url-file testorg.sfdx-url \
-            --alias testorg
-
-      - name: Deploy source to Testing Org
-        run: |
-          sf project deploy start \
-            --target-org testorg \
-            --source-dir force-app/main/default \
-            --ignore-conflicts \
-            --wait 30 \
-            --concise
-
-      - name: Clean up auth file
-        if: always()
-        run: rm -f testorg.sfdx-url
-
-  post-deploy-tests:
-    name: Post-Deploy Tests
-    runs-on: ubuntu-latest
-    needs: deploy-testorg
-    if: github.event_name == 'push'
-    steps:
-      - name: Install Salesforce CLI
-        run: npm install -g @salesforce/cli
-
-      - name: Validate required test org secret
-        run: test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
-
-      - name: Write Testing Org auth URL to file
-        run: echo "${{ secrets.TESTORG_SFDX_URL }}" > testorg.sfdx-url
-
-      - name: Authenticate Testing Org via sfdx-url
-        run: |
-          sf org login sfdx-url \
-            --sfdx-url-file testorg.sfdx-url \
-            --alias testorg
-
-      - name: Run post-deploy Apex tests in Testing Org
-        run: |
-          sf apex run test \
-            --target-org testorg \
-            --test-level RunSpecifiedTests \
-            --tests Clarity360SmokeTest \
-            --result-format human \
-            --wait 30
-
-      - name: Clean up auth file
-        if: always()
-        run: rm -f testorg.sfdx-url
-
-  release-pipeline:
-    name: release-pipeline
+  production-pipeline:
+    name: production-pipeline
     runs-on: ubuntu-latest
     needs: testorg-validation
-    if: github.event_name == 'pull_request'
     steps:
-      - name: Mark release pipeline successful
-        run: echo "Release pull request validation completed successfully."
-
-  release-deployment:
-    name: Release Deployment
-    runs-on: ubuntu-latest
-    needs: post-deploy-tests
-    if: github.event_name == 'push'
-    steps:
-      - name: Mark release deployment successful
-        run: echo "Release branch deployment completed successfully."
+      - name: Mark production pipeline successful
+        run: echo "Production pull request validation completed successfully."
