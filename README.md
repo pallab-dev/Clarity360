@@ -6,6 +6,8 @@ Clarity360 is a Salesforce 2GP managed package repository. The repository uses p
 
 For teams staying on GitHub Free for a private repository, this repo also includes a local Git hook installer and merge-verification steps inside the deployment workflows to reduce accidental direct pushes without paid branch protection.
 
+Current repository access check: only `pallab-dev` is listed as a collaborator with admin rights, so only that account can merge today. If additional collaborators are added later, the merged-PR deployment workflows still block deployment and release unless the merge was performed by `pallab-dev`.
+
 ## Branch strategy
 
 The repository uses exactly 3 branch types:
