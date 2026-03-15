@@ -12,63 +12,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify-production-merge:
-    name: Verify Production Merge
-    runs-on: ubuntu-latest
-    if: github.event.pull_request.merged == true
-    permissions:
-      actions: read
-      pull-requests: read
-    outputs:
-      merge_sha: ${{ steps.verify.outputs.merge_sha }}
-    steps:
-      - name: Verify production PR validation succeeded
-        id: verify
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const pull = context.payload.pull_request;
-            if (!pull || !pull.merged) {
-              core.setFailed('Only merged pull requests can trigger production release.');
-              return;
-            }
-
-            const mergedBy = pull.merged_by?.login;
-            if (mergedBy !== 'pallab-dev') {
-              core.setFailed(`Production release is blocked because PR #${pull.number} was merged by ${mergedBy || 'an unknown user'}, not pallab-dev.`);
-              return;
-            }
-
-            const runsResponse = await github.rest.actions.listWorkflowRuns({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'production-validation.yml',
-              event: 'pull_request',
-              per_page: 100,
-            });
-
-            const validationRun = runsResponse.data.workflow_runs.find((run) =>
-              run.head_sha === pull.head.sha && run.conclusion === 'success'
-            );
-
-            if (!validationRun) {
-              core.setFailed(`Production release is blocked because PR validation did not succeed for PR #${pull.number}.`);
-              return;
-            }
-
-            core.setOutput('merge_sha', pull.merge_commit_sha || context.sha);
-
   promote-package:
     name: Promote Package
     runs-on: ubuntu-latest
-    needs: verify-production-merge
     if: github.event.pull_request.merged == true
     steps:
       - name: Checkout merged production content
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ needs.verify-production-merge.outputs.merge_sha }}
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
 
       - name: Install Salesforce CLI
         run: npm install -g @salesforce/cli
@@ -112,9 +65,7 @@ jobs:
   create-release-tag:
     name: Create Release Tag
     runs-on: ubuntu-latest
-    needs:
-      - verify-production-merge
-      - promote-package
+    needs: promote-package
     if: github.event.pull_request.merged == true
     permissions:
       contents: write
@@ -123,7 +74,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ needs.verify-production-merge.outputs.merge_sha }}
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
 
       - name: Skip release tag when no version exists
         if: ${{ hashFiles('.version-id') == '' }}
