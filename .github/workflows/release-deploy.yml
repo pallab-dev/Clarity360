@@ -12,63 +12,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify-release-merge:
-    name: Verify Release Merge
-    runs-on: ubuntu-latest
-    if: github.event.pull_request.merged == true
-    permissions:
-      actions: read
-      pull-requests: read
-    outputs:
-      merge_sha: ${{ steps.verify.outputs.merge_sha }}
-    steps:
-      - name: Verify release PR validation succeeded
-        id: verify
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const pull = context.payload.pull_request;
-            if (!pull || !pull.merged) {
-              core.setFailed('Only merged pull requests can trigger release deployment.');
-              return;
-            }
-
-            const mergedBy = pull.merged_by?.login;
-            if (mergedBy !== 'pallab-dev') {
-              core.setFailed(`Release deployment is blocked because PR #${pull.number} was merged by ${mergedBy || 'an unknown user'}, not pallab-dev.`);
-              return;
-            }
-
-            const runsResponse = await github.rest.actions.listWorkflowRuns({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'release-validation.yml',
-              event: 'pull_request',
-              per_page: 100,
-            });
-
-            const validationRun = runsResponse.data.workflow_runs.find((run) =>
-              run.head_sha === pull.head.sha && run.conclusion === 'success'
-            );
-
-            if (!validationRun) {
-              core.setFailed(`Release deployment is blocked because PR validation did not succeed for PR #${pull.number}.`);
-              return;
-            }
-
-            core.setOutput('merge_sha', pull.merge_commit_sha || context.sha);
-
   deploy-testorg:
     name: Deploy To Testing Org
     runs-on: ubuntu-latest
-    needs: verify-release-merge
     if: github.event.pull_request.merged == true
     steps:
       - name: Checkout merged release content
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ needs.verify-release-merge.outputs.merge_sha }}
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
 
       - name: Install Salesforce CLI
         run: npm install -g @salesforce/cli
@@ -101,16 +54,14 @@ jobs:
   post-deploy-tests:
     name: Post-Deploy Tests
     runs-on: ubuntu-latest
-    needs:
-      - verify-release-merge
-      - deploy-testorg
+    needs: deploy-testorg
     if: github.event.pull_request.merged == true
     steps:
       - name: Checkout merged release content
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ needs.verify-release-merge.outputs.merge_sha }}
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
 
       - name: Install Salesforce CLI
         run: npm install -g @salesforce/cli

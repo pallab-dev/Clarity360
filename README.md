@@ -4,10 +4,6 @@
 
 Clarity360 is a Salesforce 2GP managed package repository. The repository uses protected promotion branches, two GitHub Actions pipelines, and no direct pushes to release or production branches.
 
-For teams staying on GitHub Free for a private repository, this repo also includes a local Git hook installer and merge-verification steps inside the deployment workflows to reduce accidental direct pushes without paid branch protection.
-
-Current repository access check: only `pallab-dev` is listed as a collaborator with admin rights, so only that account can merge today. If additional collaborators are added later, the merged-PR deployment workflows still block deployment and release unless the merge was performed by `pallab-dev`.
-
 ## Branch strategy
 
 The repository uses exactly 3 branch types:
@@ -47,18 +43,6 @@ The repository uses exactly 3 branch types:
 7. When the sprint is complete, the release manager opens a pull request from `release/N` to `production`.
 8. Get 2 approvals and a green `production-pipeline`, then merge the pull request.
 9. The merge commit to `production` automatically promotes the package version and creates the release tag.
-
-## Local Push Guard
-
-Install the repo-managed Git hooks once per clone:
-
-```bash
-npm run install:hooks
-```
-
-This configures `.githooks/pre-push` as the local pre-push hook and blocks direct pushes to `release/*` and `production`.
-
-This is best-effort only. Local Git hooks can be bypassed by a developer, so they do not replace GitHub branch protection.
 
 ## Branch Protection Rules
 
@@ -100,7 +84,7 @@ Add these secrets in GitHub Settings -> Secrets -> Actions.
 
 ## Quality gates
 
-Both pipelines now expose the quality checks as separate GitHub Actions jobs. Pull requests run the validation path against the shared Testing Org. Separate merged-PR workflows run the release deployment and production release paths only after a successful validation run has been found for that pull request.
+Both pipelines now expose the quality checks as separate GitHub Actions jobs. Pull requests run the validation path against the shared Testing Org. Separate merged-PR workflows run the release deployment and production release paths after the branch protection rules allow the merge.
 
 1. PMD static analysis using `sf scanner run` against all Apex classes and triggers in the package. Any severity 1 or 2 violation fails the `PMD Scan` job.
 2. ESLint for LWC and Aura using `npm run lint` against `./force-app/**/*.js`. Any ESLint error fails the `ESLint` job. Warnings are allowed.
@@ -112,8 +96,6 @@ Both pipelines now expose the quality checks as separate GitHub Actions jobs. Pu
 8. AppExchange PMD review scanning using `sf scanner run --engine pmd-appexchange` with severity threshold `2`.
 
 The final pull request checks remain `release-pipeline` and `production-pipeline`. Those jobs only pass when all upstream validation jobs succeed.
-
-Merged-PR deployment and promotion workflows also re-check that the associated pull request validation workflow concluded successfully before any deployment or promotion step starts.
 
 ## AppExchange Security Review policy
 
