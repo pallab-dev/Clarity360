@@ -2,13 +2,37 @@
  * @description Centralizes CRUD and field-level access enforcement for application services.
  */
 public with sharing class Clarity360AccessControlService {
+    @TestVisible
+    static AccessEvaluator accessEvaluator = new AccessEvaluator();
+
+    @TestVisible
+    static Boolean useSecurityStripInTests = false;
+
+    public virtual class AccessEvaluator {
+        public virtual Boolean canRead(Schema.SObjectType objectType) {
+            return objectType == null || objectType.getDescribe().isAccessible();
+        }
+
+        public virtual Boolean canCreate(Schema.SObjectType objectType) {
+            return objectType == null || objectType.getDescribe().isCreateable();
+        }
+
+        public virtual Boolean canUpdate(Schema.SObjectType objectType) {
+            return objectType == null || objectType.getDescribe().isUpdateable();
+        }
+
+        public virtual Boolean canDelete(Schema.SObjectType objectType) {
+            return objectType == null || objectType.getDescribe().isDeletable();
+        }
+    }
+
     /**
      * @description Ensures the running user can read the specified object before use.
      * @param objectType The object type being accessed.
      * @param operationName The logical operation requesting access.
      */
     public void assertReadable(Schema.SObjectType objectType, String operationName) {
-        if (objectType == null || objectType.getDescribe().isAccessible()) {
+        if (accessEvaluator.canRead(objectType)) {
             return;
         }
         throw new SecurityException('Insufficient read access for ' + String.valueOf(objectType) + ' in ' + operationName + '.');
@@ -20,7 +44,7 @@ public with sharing class Clarity360AccessControlService {
      * @param operationName The logical operation requesting access.
      */
     public void assertCreateable(Schema.SObjectType objectType, String operationName) {
-        if (objectType == null || objectType.getDescribe().isCreateable()) {
+        if (accessEvaluator.canCreate(objectType)) {
             return;
         }
         throw new SecurityException('Insufficient create access for ' + String.valueOf(objectType) + ' in ' + operationName + '.');
@@ -32,7 +56,7 @@ public with sharing class Clarity360AccessControlService {
      * @param operationName The logical operation requesting access.
      */
     public void assertUpdateable(Schema.SObjectType objectType, String operationName) {
-        if (objectType == null || objectType.getDescribe().isUpdateable()) {
+        if (accessEvaluator.canUpdate(objectType)) {
             return;
         }
         throw new SecurityException('Insufficient update access for ' + String.valueOf(objectType) + ' in ' + operationName + '.');
@@ -44,7 +68,7 @@ public with sharing class Clarity360AccessControlService {
      * @param operationName The logical operation requesting access.
      */
     public void assertDeleteable(Schema.SObjectType objectType, String operationName) {
-        if (objectType == null || objectType.getDescribe().isDeletable()) {
+        if (accessEvaluator.canDelete(objectType)) {
             return;
         }
         throw new SecurityException('Insufficient delete access for ' + String.valueOf(objectType) + ' in ' + operationName + '.');
@@ -59,7 +83,7 @@ public with sharing class Clarity360AccessControlService {
         if (records == null || records.isEmpty()) {
             return new List<SObject>();
         }
-        if (Test.isRunningTest()) {
+        if (shouldCloneInTests()) {
             return cloneRecords(records);
         }
         return Security.stripInaccessible(AccessType.READABLE, records).getRecords();
@@ -74,7 +98,7 @@ public with sharing class Clarity360AccessControlService {
         if (records == null || records.isEmpty()) {
             return new List<SObject>();
         }
-        if (Test.isRunningTest()) {
+        if (shouldCloneInTests()) {
             return cloneRecords(records);
         }
 
@@ -108,6 +132,10 @@ public with sharing class Clarity360AccessControlService {
      */
     public static Clarity360AccessControlService get() {
         return new Clarity360AccessControlService();
+    }
+
+    private static Boolean shouldCloneInTests() {
+        return Test.isRunningTest() && useSecurityStripInTests != true;
     }
 
     private static List<SObject> cloneRecords(List<SObject> records) {

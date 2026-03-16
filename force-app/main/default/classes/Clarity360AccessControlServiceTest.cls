@@ -1,5 +1,29 @@
 @IsTest
 private class Clarity360AccessControlServiceTest {
+    private class DenyAllAccessEvaluator extends Clarity360AccessControlService.AccessEvaluator {
+        public override Boolean canRead(Schema.SObjectType objectType) {
+            return objectType == null;
+        }
+
+        public override Boolean canCreate(Schema.SObjectType objectType) {
+            return objectType == null;
+        }
+
+        public override Boolean canUpdate(Schema.SObjectType objectType) {
+            return objectType == null;
+        }
+
+        public override Boolean canDelete(Schema.SObjectType objectType) {
+            return objectType == null;
+        }
+    }
+
+    @TestSetup
+    static void resetAccessControlDefaults() {
+        Clarity360AccessControlService.accessEvaluator = new Clarity360AccessControlService.AccessEvaluator();
+        Clarity360AccessControlService.useSecurityStripInTests = false;
+    }
+
     @IsTest
     static void assertMethodsAllowAccessibleAndNullObjectTypes() {
         Clarity360AccessControlService service = new Clarity360AccessControlService();
@@ -16,6 +40,40 @@ private class Clarity360AccessControlServiceTest {
         Test.stopTest();
 
         System.assertNotEquals(null, service, 'Service instance should remain available after access checks.');
+    }
+
+    @IsTest
+    static void assertMethodsThrowWhenAccessEvaluatorDeniesOperation() {
+        Clarity360AccessControlService service = new Clarity360AccessControlService();
+        Clarity360AccessControlService.accessEvaluator = new DenyAllAccessEvaluator();
+
+        try {
+            service.assertReadable(Account.SObjectType, 'read-op');
+            System.assert(false, 'Read access should be denied.');
+        } catch (SecurityException ex) {
+            System.assert(ex.getMessage().contains('Insufficient read access'), 'Read failure should mention the denied operation.');
+        }
+
+        try {
+            service.assertCreateable(Account.SObjectType, 'create-op');
+            System.assert(false, 'Create access should be denied.');
+        } catch (SecurityException ex) {
+            System.assert(ex.getMessage().contains('Insufficient create access'), 'Create failure should mention the denied operation.');
+        }
+
+        try {
+            service.assertUpdateable(Account.SObjectType, 'update-op');
+            System.assert(false, 'Update access should be denied.');
+        } catch (SecurityException ex) {
+            System.assert(ex.getMessage().contains('Insufficient update access'), 'Update failure should mention the denied operation.');
+        }
+
+        try {
+            service.assertDeleteable(Account.SObjectType, 'delete-op');
+            System.assert(false, 'Delete access should be denied.');
+        } catch (SecurityException ex) {
+            System.assert(ex.getMessage().contains('Insufficient delete access'), 'Delete failure should mention the denied operation.');
+        }
     }
 
     @IsTest
@@ -54,6 +112,18 @@ private class Clarity360AccessControlServiceTest {
     }
 
     @IsTest
+    static void stripReadableCanExerciseSecuritySanitizationPathInTests() {
+        Clarity360AccessControlService service = new Clarity360AccessControlService();
+        Clarity360AccessControlService.useSecurityStripInTests = true;
+        Account original = new Account(Name = 'Readable');
+
+        List<SObject> stripped = service.stripReadable(new List<SObject>{ original });
+
+        System.assertEquals(1, stripped.size(), 'Readable sanitization should return one row.');
+        System.assertEquals('Readable', ((Account) stripped[0]).Name, 'Readable sanitization should preserve accessible field values.');
+    }
+
+    @IsTest
     static void stripForUpsertReturnsClonesForInsertAndUpdateRecords() {
         Clarity360AccessControlService service = new Clarity360AccessControlService();
 
@@ -68,6 +138,27 @@ private class Clarity360AccessControlServiceTest {
 
         System.assertEquals(3, stripped.size(), 'Upsert strip should preserve all rows including nulls.');
         System.assertEquals(null, stripped[2], 'Null upsert row should remain null.');
+        System.assertEquals(existing.Id, ((Account) stripped[0]).Id, 'Updated row should preserve the record id.');
+        System.assertEquals('Updated', ((Account) stripped[0]).Name, 'Updated row should preserve changed values.');
+        System.assertEquals(null, ((Account) stripped[1]).Id, 'Insert row should remain an insert candidate.');
+        System.assertEquals('Inserted', ((Account) stripped[1]).Name, 'Insert row should preserve field values.');
+    }
+
+    @IsTest
+    static void stripForUpsertCanExerciseSecuritySanitizationPathInTests() {
+        Clarity360AccessControlService service = new Clarity360AccessControlService();
+        Clarity360AccessControlService.useSecurityStripInTests = true;
+
+        Account existing = new Account(Name = 'Existing');
+        insert existing;
+        Account updated = existing.clone(false, true, false, false);
+        updated.Id = existing.Id;
+        updated.Name = 'Updated';
+        Account toInsert = new Account(Name = 'Inserted');
+
+        List<SObject> stripped = service.stripForUpsert(new List<SObject>{ updated, toInsert });
+
+        System.assertEquals(2, stripped.size(), 'Upsert sanitization should return both insert and update rows.');
         System.assertEquals(existing.Id, ((Account) stripped[0]).Id, 'Updated row should preserve the record id.');
         System.assertEquals('Updated', ((Account) stripped[0]).Name, 'Updated row should preserve changed values.');
         System.assertEquals(null, ((Account) stripped[1]).Id, 'Insert row should remain an insert candidate.');
