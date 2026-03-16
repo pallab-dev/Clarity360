@@ -135,7 +135,7 @@ describe('c-clarity360-dashboard', () => {
         await seedDashboardData();
 
         expect(document.body.textContent).toContain('Cleanliness Score');
-        expect(document.body.textContent).toContain('92%');
+        expect(document.body.textContent).toContain('92.00%');
         expect(document.body.textContent).toContain('Legacy_Flag__c');
         expect(document.body.textContent).toContain('Deprecate');
     });

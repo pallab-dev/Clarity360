@@ -92,7 +92,7 @@ jobs:
             fi
           done < .ci/changed-files.txt > .ci/changed-existing-files.txt
           grep -E '\.(cls|trigger)$' .ci/changed-existing-files.txt > .ci/changed-apex.txt || true
-          grep -E '\.js$' .ci/changed-existing-files.txt > .ci/changed-js.txt || true
+          grep -E '\.js$' .ci/changed-existing-files.txt | grep -Ev '/__tests__/' > .ci/changed-js.txt || true
           grep -E '\.xml$' .ci/changed-existing-files.txt > .ci/changed-xml.txt || true
 
       - name: Run PMD on changed Apex
