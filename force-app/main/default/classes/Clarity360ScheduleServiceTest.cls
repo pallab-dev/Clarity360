@@ -164,4 +164,34 @@ private class Clarity360ScheduleServiceTest {
             'Config load exceptions should be swallowed without creating scan jobs.'
         );
     }
+
+    @IsTest
+    static void defaultSetupConfigLoaderLoadsPersistedConfig() {
+        Clarity360SetupConfigService.SetupConfigDTO input = Clarity360SetupConfigService.load();
+        input.isSetupComplete = true;
+        input.enableScheduledScan = true;
+        input.scheduleFrequency = 'Weekly';
+        Clarity360SetupConfigService.save(input);
+
+        Clarity360SetupConfigService.SetupConfigDTO loaded =
+            new ScanOrchestratorSchedulable.SetupConfigLoader().load();
+
+        System.assertEquals(true, loaded.isSetupComplete, 'Default loader should delegate to setup config service.');
+        System.assertEquals(true, loaded.enableScheduledScan, 'Default loader should return scheduled scan flag.');
+        System.assertEquals('Weekly', loaded.scheduleFrequency, 'Default loader should return persisted schedule frequency.');
+    }
+
+    @IsTest
+    static void defaultFullScanRunnerDispatchesFullScan() {
+        delete [SELECT Id FROM ScanJob__c];
+        FullScanQueueable.skipUsageBatchInTests = true;
+
+        Test.startTest();
+        new ScanOrchestratorSchedulable.FullScanRunner().run();
+        Test.stopTest();
+
+        Integer jobCount = [SELECT COUNT() FROM ScanJob__c WHERE JobType__c = 'Full Scan'];
+        System.assert(jobCount > 0, 'Default full scan runner should dispatch a full scan job.');
+        FullScanQueueable.skipUsageBatchInTests = false;
+    }
 }
