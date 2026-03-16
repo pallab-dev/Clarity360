@@ -157,12 +157,14 @@ private class Clarity360AccessControlServiceTest {
         Account toInsert = new Account(Name = 'Inserted');
 
         List<SObject> stripped = service.stripForUpsert(new List<SObject>{ updated, toInsert });
+        Account firstRow = (Account) stripped[0];
+        Account secondRow = (Account) stripped[1];
 
         System.assertEquals(2, stripped.size(), 'Upsert sanitization should return both insert and update rows.');
-        System.assertEquals(existing.Id, ((Account) stripped[0]).Id, 'Updated row should preserve the record id.');
-        System.assertEquals('Updated', ((Account) stripped[0]).Name, 'Updated row should preserve changed values.');
-        System.assertEquals(null, ((Account) stripped[1]).Id, 'Insert row should remain an insert candidate.');
-        System.assertEquals('Inserted', ((Account) stripped[1]).Name, 'Insert row should preserve field values.');
+        System.assertEquals(null, firstRow.Id, 'Insert rows should remain insert candidates after sanitization.');
+        System.assertEquals('Inserted', firstRow.Name, 'Insert rows should preserve field values.');
+        System.assertEquals(existing.Id, secondRow.Id, 'Update rows should preserve the record id.');
+        System.assertEquals('Updated', secondRow.Name, 'Update rows should preserve changed values.');
     }
 
     @IsTest
