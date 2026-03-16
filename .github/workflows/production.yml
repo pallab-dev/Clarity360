@@ -539,11 +539,21 @@ jobs:
 
       - name: Delete install validation scratch org
         if: always()
-        run: sf org delete scratch --target-org pr-smoke-install --no-prompt
+        run: |
+          if sf org display --target-org pr-smoke-install --json >/dev/null 2>&1; then
+            sf org delete scratch --target-org pr-smoke-install --no-prompt
+          else
+            echo "Scratch org alias pr-smoke-install not found; skipping cleanup."
+          fi
 
       - name: Delete upgrade validation scratch org
         if: always()
-        run: sf org delete scratch --target-org pr-smoke-upgrade --no-prompt
+        run: |
+          if sf org display --target-org pr-smoke-upgrade --json >/dev/null 2>&1; then
+            sf org delete scratch --target-org pr-smoke-upgrade --no-prompt
+          else
+            echo "Scratch org alias pr-smoke-upgrade not found; skipping cleanup."
+          fi
 
       - name: Clean up base source worktree
         if: always()
