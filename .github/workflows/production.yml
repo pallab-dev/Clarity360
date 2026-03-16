@@ -1,0 +1,568 @@
+name: Production PR Validation
+
+on:
+  pull_request:
+    branches:
+      - production
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+concurrency:
+  group: production-pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      has_apex_changes: ${{ steps.detect.outputs.has_apex_changes }}
+      has_js_changes: ${{ steps.detect.outputs.has_js_changes }}
+      has_xml_changes: ${{ steps.detect.outputs.has_xml_changes }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed source files
+        id: detect
+        shell: bash
+        run: |
+          mkdir -p .ci
+          git fetch --no-tags origin "${{ github.event.pull_request.base.ref }}"
+          git diff --name-only --diff-filter=ACMRTUXB "origin/${{ github.event.pull_request.base.ref }}...HEAD" \
+            -- force-app manifest .github > .ci/changed-files.txt || true
+          if grep -Eq '\.(cls|trigger)$' .ci/changed-files.txt; then
+            echo "has_apex_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_apex_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+          if grep -Eq '\.js$' .ci/changed-files.txt; then
+            echo "has_js_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_js_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+          if grep -Eq '\.xml$' .ci/changed-files.txt; then
+            echo "has_xml_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_xml_changes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  delta-quality-gates:
+    name: Delta Quality Gates
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Install Salesforce CLI
+        run: npm install -g @salesforce/cli
+
+      - name: Install Salesforce Scanner plugin
+        run: sf plugins install @salesforce/sfdx-scanner
+
+      - name: Install LWC Jest runner
+        run: npm install --no-save @salesforce/sfdx-lwc-jest
+
+      - name: Collect changed files
+        shell: bash
+        run: |
+          mkdir -p .ci
+          git fetch --no-tags origin "${{ github.event.pull_request.base.ref }}"
+          git diff --name-only --diff-filter=ACMRTUXB "origin/${{ github.event.pull_request.base.ref }}...HEAD" \
+            -- force-app manifest .github > .ci/changed-files.txt
+          while IFS= read -r changed_path; do
+            if [ -e "$changed_path" ]; then
+              echo "$changed_path"
+            fi
+          done < .ci/changed-files.txt > .ci/changed-existing-files.txt
+          grep -E '\.(cls|trigger)$' .ci/changed-existing-files.txt > .ci/changed-apex.txt || true
+          grep -E '\.js$' .ci/changed-existing-files.txt > .ci/changed-js.txt || true
+          grep -E '\.xml$' .ci/changed-existing-files.txt > .ci/changed-xml.txt || true
+
+      - name: Run PMD on changed Apex
+        shell: bash
+        run: |
+          if [ ! -s .ci/changed-apex.txt ]; then
+            echo "No changed Apex or trigger files detected."
+            exit 0
+          fi
+          declare -a TARGET_ARGS
+          while IFS= read -r apex_file; do
+            TARGET_ARGS+=(--target "$apex_file")
+          done < .ci/changed-apex.txt
+          sf scanner run \
+            "${TARGET_ARGS[@]}" \
+            --engine pmd \
+            --severity-threshold 2 \
+            --format table \
+            --verbose-violations
+
+      - name: Run ESLint on changed JavaScript
+        shell: bash
+        run: |
+          if [ ! -s .ci/changed-js.txt ]; then
+            echo "No changed JavaScript files detected."
+            exit 0
+          fi
+          mapfile -t JS_FILES < .ci/changed-js.txt
+          npx eslint "${JS_FILES[@]}"
+
+      - name: Run LWC Jest tests
+        shell: bash
+        run: |
+          if ! find force-app/main/default/lwc -path '*/__tests__/*.test.js' -print -quit | grep -q .; then
+            echo "No LWC Jest tests detected."
+            exit 0
+          fi
+          npx sfdx-lwc-jest --runInBand
+
+      - name: Validate changed XML files
+        shell: bash
+        run: |
+          if [ ! -s .ci/changed-xml.txt ]; then
+            echo "No changed XML files detected."
+            exit 0
+          fi
+          sudo apt-get update
+          sudo apt-get install -y libxml2-utils
+          xargs -a .ci/changed-xml.txt xmllint --noout
+
+  changed-apex-coverage:
+    name: Changed Apex Coverage
+    runs-on: ubuntu-latest
+    needs: delta-quality-gates
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Salesforce CLI
+        run: npm install -g @salesforce/cli
+
+      - name: Detect changed Apex members
+        shell: bash
+        run: |
+          mkdir -p .ci
+          git fetch --no-tags origin "${{ github.event.pull_request.base.ref }}"
+          git diff --name-only --diff-filter=ACMRTUXB "origin/${{ github.event.pull_request.base.ref }}...HEAD" \
+            -- force-app/main/default > .ci/changed-source-paths-raw.txt
+          while IFS= read -r changed_path; do
+            if [ -e "$changed_path" ]; then
+              echo "$changed_path"
+            fi
+          done < .ci/changed-source-paths-raw.txt > .ci/changed-source-paths.txt
+          grep -E '\.(cls|trigger)$' .ci/changed-source-paths.txt | grep -Ev 'Test\.cls$' > .ci/changed-apex-members.txt || true
+          find force-app/main/default/classes -name '*Test.cls' -print \
+            | sed 's#force-app/main/default/classes/##' \
+            | sed 's#\.cls$##' \
+            | sort > .ci/local-test-classes.txt
+          if [ ! -s .ci/changed-apex-members.txt ]; then
+            echo "No changed non-test Apex classes or triggers detected."
+            exit 0
+          fi
+
+      - name: Validate required test org secret
+        run: test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
+
+      - name: Write Testing Org auth URL to file
+        run: echo "${{ secrets.TESTORG_SFDX_URL }}" > testorg.sfdx-url
+
+      - name: Authenticate Testing Org
+        run: |
+          sf org login sfdx-url \
+            --sfdx-url-file testorg.sfdx-url \
+            --alias testorg
+
+      - name: Validate coverage for changed Apex members
+        shell: bash
+        run: |
+          if [ ! -s .ci/changed-apex-members.txt ]; then
+            echo "No changed non-test Apex classes or triggers detected."
+            exit 0
+          fi
+          declare -a SOURCE_ARGS
+          while IFS= read -r member; do
+            SOURCE_ARGS+=(--source-dir "$member")
+          done < .ci/changed-source-paths.txt
+          declare -a TEST_ARGS
+          while IFS= read -r test_class; do
+            TEST_ARGS+=(--tests "$test_class")
+          done < .ci/local-test-classes.txt
+          sf project deploy start \
+            --target-org testorg \
+            "${SOURCE_ARGS[@]}" \
+            --ignore-conflicts \
+            --dry-run \
+            --test-level RunSpecifiedTests \
+            "${TEST_ARGS[@]}" \
+            --wait 30
+
+          MEMBER_NAMES=$(awk -F/ '
+            /\.trigger$/ { sub(/\.trigger$/, "", $NF); print $NF }
+            /\.cls$/ && $NF !~ /Test\.cls$/ { sub(/\.cls$/, "", $NF); print $NF }
+          ' .ci/changed-apex-members.txt | sort -u)
+          if [ -z "$MEMBER_NAMES" ]; then
+            echo "Unable to determine changed Apex member names."
+            exit 1
+          fi
+          IN_CLAUSE=""
+          while IFS= read -r member_name; do
+            if [ -n "$IN_CLAUSE" ]; then
+              IN_CLAUSE="${IN_CLAUSE},"
+            fi
+            IN_CLAUSE="${IN_CLAUSE}'${member_name}'"
+          done <<EOF
+          $MEMBER_NAMES
+          EOF
+          COVERAGE_JSON=$(sf data query \
+            --use-tooling-api \
+            --json \
+            --target-org testorg \
+            --query "SELECT ApexClassOrTrigger.Name, NumLinesCovered, NumLinesUncovered FROM ApexCodeCoverageAggregate WHERE ApexClassOrTrigger.Name IN (${IN_CLAUSE})")
+          echo "$COVERAGE_JSON" > .ci/changed-coverage.json
+          jq -r '.result.records[] | [.ApexClassOrTrigger.Name, .NumLinesCovered, .NumLinesUncovered] | @tsv' .ci/changed-coverage.json > .ci/changed-coverage.tsv
+          if [ ! -s .ci/changed-coverage.tsv ]; then
+            echo "No coverage rows returned for changed Apex members."
+            exit 1
+          fi
+          while IFS=$'\t' read -r member covered uncovered; do
+            total=$((covered + uncovered))
+            if [ "$total" -eq 0 ]; then
+              echo "No coverage data recorded for ${member}."
+              exit 1
+            fi
+            pct=$(awk "BEGIN { printf \"%.2f\", (${covered} / ${total}) * 100 }")
+            echo "${member} coverage: ${pct}%"
+            if ! awk "BEGIN {exit !(${pct} >= 75)}"; then
+              echo "Coverage for ${member} is below 75%."
+              exit 1
+            fi
+          done < .ci/changed-coverage.tsv
+
+      - name: Clean up auth file
+        if: always()
+        run: rm -f testorg.sfdx-url
+
+  platform-safety-gates:
+    name: Platform Safety Gates
+    runs-on: ubuntu-latest
+    needs: changed-apex-coverage
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Install Salesforce CLI
+        run: npm install -g @salesforce/cli
+
+      - name: Install Salesforce Scanner plugin
+        run: sf plugins install @salesforce/sfdx-scanner
+
+      - name: Validate required project files
+        run: |
+          test -f sfdx-project.json || { echo "Missing sfdx-project.json"; exit 1; }
+          test -f config/project-scratch-def.json || { echo "Missing config/project-scratch-def.json"; exit 1; }
+
+      - name: Run Salesforce Scanner security rules
+        run: |
+          sf scanner run \
+            --target "./force-app" \
+            --category "Security" \
+            --severity-threshold 1 \
+            --format table \
+            --verbose-violations
+
+      - name: Run AppExchange PMD review scan
+        run: |
+          sf scanner run \
+            --engine pmd-appexchange \
+            --target "./" \
+            --severity-threshold 2 \
+            --format table \
+            --verbose-violations
+
+  testing-org-integration:
+    name: Testing Org Integration
+    runs-on: ubuntu-latest
+    needs: platform-safety-gates
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Install Salesforce CLI
+        run: npm install -g @salesforce/cli
+
+      - name: Validate required test org secret
+        run: test -n "${{ secrets.TESTORG_SFDX_URL }}" || { echo "Missing TESTORG_SFDX_URL"; exit 1; }
+
+      - name: Write Testing Org auth URL to file
+        run: echo "${{ secrets.TESTORG_SFDX_URL }}" > testorg.sfdx-url
+
+      - name: Authenticate Testing Org
+        run: |
+          sf org login sfdx-url \
+            --sfdx-url-file testorg.sfdx-url \
+            --alias testorg
+
+      - name: Deploy source to Testing Org
+        run: |
+          sf project deploy start \
+            --target-org testorg \
+            --source-dir force-app/main/default \
+            --ignore-conflicts \
+            --wait 30 \
+            --concise
+
+      - name: Run integration tests in Testing Org
+        shell: bash
+        run: |
+          mapfile -t INTEGRATION_TESTS < .github/apex/integration-tests.txt
+          if [ "${#INTEGRATION_TESTS[@]}" -eq 0 ]; then
+            echo "No integration tests configured."
+            exit 1
+          fi
+          declare -a TEST_ARGS
+          for test_name in "${INTEGRATION_TESTS[@]}"; do
+            TEST_ARGS+=(--tests "$test_name")
+          done
+          sf apex run test \
+            --target-org testorg \
+            --test-level RunSpecifiedTests \
+            "${TEST_ARGS[@]}" \
+            --code-coverage \
+            --result-format human \
+            --wait 30
+
+      - name: Clean up auth file
+        if: always()
+        run: rm -f testorg.sfdx-url
+
+  scratch-org-package-smoke:
+    name: Scratch Org Package Smoke
+    runs-on: ubuntu-latest
+    needs: platform-safety-gates
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Install Salesforce CLI
+        run: npm install -g @salesforce/cli
+
+      - name: Validate required packaging secrets
+        run: |
+          test -n "${{ secrets.DEVHUB_SFDX_URL }}" || { echo "Missing DEVHUB_SFDX_URL"; exit 1; }
+          test -n "${{ secrets.PACKAGE_ID }}" || { echo "Missing PACKAGE_ID"; exit 1; }
+
+      - name: Write Dev Hub auth URL to file
+        run: echo "${{ secrets.DEVHUB_SFDX_URL }}" > devhub.sfdx-url
+
+      - name: Authenticate Dev Hub
+        run: |
+          sf org login sfdx-url \
+            --sfdx-url-file devhub.sfdx-url \
+            --set-default-dev-hub \
+            --alias devhub
+
+      - name: Prepare base source for package validation
+        shell: bash
+        run: |
+          mkdir -p .ci
+          git fetch --no-tags origin "${{ github.event.pull_request.base.ref }}"
+          rm -rf .ci/base-ref
+          git worktree add --detach .ci/base-ref "origin/${{ github.event.pull_request.base.ref }}"
+
+      - name: Create package versions for install and upgrade validation
+        shell: bash
+        run: |
+          resolve_subscriber_version_id() {
+            local create_json="$1"
+            local subscriber_id
+            local package2_version_id
+            local report_json
+
+            subscriber_id=$(echo "$create_json" | jq -r '.result.SubscriberPackageVersionId // empty')
+            if [ -n "$subscriber_id" ]; then
+              echo "$subscriber_id"
+              return 0
+            fi
+
+            package2_version_id=$(echo "$create_json" | jq -r '.result.Package2VersionId // .result.Id // empty')
+            if [ -z "$package2_version_id" ]; then
+              return 1
+            fi
+
+            report_json=$(sf package version report \
+              --package "$package2_version_id" \
+              --target-dev-hub devhub \
+              --json)
+            echo "$report_json" > .ci/package-version-report.json
+            echo "$report_json" | jq -r '.result.SubscriberPackageVersionId // empty'
+          }
+
+          HEAD_CREATE_JSON=$(sf package version create \
+            --package "${{ secrets.PACKAGE_ID }}" \
+            --path force-app/main/default \
+            --definition-file config/project-scratch-def.json \
+            --installation-key-bypass \
+            --code-coverage \
+            --version-number 1.0.0.NEXT \
+            --version-name "PR-${{ github.event.pull_request.number }}-head" \
+            --tag "pr-${{ github.event.pull_request.number }}-head" \
+            --wait 120 \
+            --target-dev-hub devhub \
+            --json)
+          echo "$HEAD_CREATE_JSON" > .ci/head-package-version.json
+          HEAD_VERSION_ID=$(resolve_subscriber_version_id "$HEAD_CREATE_JSON")
+          if [ -z "$HEAD_VERSION_ID" ]; then
+            echo "Unable to determine package version ID for PR source."
+            exit 1
+          fi
+          echo "HEAD_PACKAGE_VERSION_ID=$HEAD_VERSION_ID" >> "$GITHUB_ENV"
+
+          pushd .ci/base-ref >/dev/null
+          BASE_CREATE_JSON=$(sf package version create \
+            --package "${{ secrets.PACKAGE_ID }}" \
+            --path force-app/main/default \
+            --definition-file config/project-scratch-def.json \
+            --installation-key-bypass \
+            --code-coverage \
+            --version-number 1.0.0.NEXT \
+            --version-name "PR-${{ github.event.pull_request.number }}-base" \
+            --tag "pr-${{ github.event.pull_request.number }}-base" \
+            --wait 120 \
+            --target-dev-hub devhub \
+            --json)
+          popd >/dev/null
+          echo "$BASE_CREATE_JSON" > .ci/base-package-version.json
+          BASE_VERSION_ID=$(resolve_subscriber_version_id "$BASE_CREATE_JSON")
+          if [ -z "$BASE_VERSION_ID" ]; then
+            echo "Unable to determine package version ID for base source."
+            exit 1
+          fi
+          echo "BASE_PACKAGE_VERSION_ID=$BASE_VERSION_ID" >> "$GITHUB_ENV"
+
+      - name: Create install validation scratch org
+        run: |
+          sf org create scratch \
+            --definition-file config/project-scratch-def.json \
+            --alias pr-smoke-install \
+            --duration-days 1 \
+            --set-default \
+            --wait 30
+
+      - name: Run install validation in scratch org
+        run: |
+          sf package install \
+            --package "$HEAD_PACKAGE_VERSION_ID" \
+            --target-org pr-smoke-install \
+            --installation-key-bypass \
+            --publish-wait 10 \
+            --wait 60 \
+            --no-prompt
+          sf apex run test \
+            --target-org pr-smoke-install \
+            --test-level RunSpecifiedTests \
+            --tests Clarity360SmokeTest \
+            --result-format human \
+            --wait 30
+
+      - name: Create upgrade validation scratch org
+        run: |
+          sf org create scratch \
+            --definition-file config/project-scratch-def.json \
+            --alias pr-smoke-upgrade \
+            --duration-days 1 \
+            --wait 30
+
+      - name: Run upgrade validation in scratch org
+        run: |
+          sf package install \
+            --package "$BASE_PACKAGE_VERSION_ID" \
+            --target-org pr-smoke-upgrade \
+            --installation-key-bypass \
+            --publish-wait 10 \
+            --wait 60 \
+            --no-prompt
+          sf package install \
+            --package "$HEAD_PACKAGE_VERSION_ID" \
+            --target-org pr-smoke-upgrade \
+            --installation-key-bypass \
+            --publish-wait 10 \
+            --wait 60 \
+            --no-prompt
+          sf apex run test \
+            --target-org pr-smoke-upgrade \
+            --test-level RunSpecifiedTests \
+            --tests Clarity360SmokeTest \
+            --result-format human \
+            --wait 30
+
+      - name: Delete install validation scratch org
+        if: always()
+        run: sf org delete scratch --target-org pr-smoke-install --no-prompt
+
+      - name: Delete upgrade validation scratch org
+        if: always()
+        run: sf org delete scratch --target-org pr-smoke-upgrade --no-prompt
+
+      - name: Clean up base source worktree
+        if: always()
+        run: |
+          git worktree remove .ci/base-ref --force || true
+          rm -rf .ci/base-ref
+
+      - name: Clean up auth file
+        if: always()
+        run: rm -f devhub.sfdx-url
+
+  manual-uat:
+    name: Manual UAT
+    runs-on: ubuntu-latest
+    needs:
+      - testing-org-integration
+      - scratch-org-package-smoke
+    environment:
+      name: testing-org-uat
+    steps:
+      - name: Await manual UAT approval
+        run: echo "Manual UAT approval recorded for this PR."
+
+  pr-pipeline:
+    name: pr-pipeline
+    runs-on: ubuntu-latest
+    needs: manual-uat
+    steps:
+      - name: Mark production PR validation successful
+        run: echo "Production PR validation completed successfully."

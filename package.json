@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "scripts": {
     "lint": "eslint ./force-app/**/*.js",
-    "lint:fix": "eslint ./force-app/**/*.js --fix"
+    "lint:fix": "eslint ./force-app/**/*.js --fix",
+    "test:unit:lwc": "sfdx-lwc-jest --runInBand"
   },
   "devDependencies": {
     "@salesforce/eslint-config-lwc": "latest",
