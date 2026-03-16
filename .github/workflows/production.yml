@@ -369,7 +369,7 @@ jobs:
   scratch-org-package-smoke:
     name: Scratch Org Package Smoke
     runs-on: ubuntu-latest
-    needs: platform-safety-gates
+    needs: testing-org-integration
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -551,7 +551,6 @@ jobs:
     name: Manual UAT
     runs-on: ubuntu-latest
     needs:
-      - testing-org-integration
       - scratch-org-package-smoke
     environment:
       name: testing-org-uat
