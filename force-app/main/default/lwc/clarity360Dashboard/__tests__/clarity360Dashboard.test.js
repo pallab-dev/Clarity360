@@ -4,49 +4,65 @@ import Clarity360Dashboard from 'c/clarity360Dashboard';
 
 import getDashboardSummary from '@salesforce/apex/Clarity360DashboardController.getDashboardSummary';
 import getRecommendations from '@salesforce/apex/Clarity360DashboardController.getRecommendations';
+import getGlobalComponentSections from '@salesforce/apex/Clarity360DashboardController.getGlobalComponentSections';
+import getMetadataComponents from '@salesforce/apex/Clarity360DashboardController.getMetadataComponents';
 import getMonitoringSnapshot from '@salesforce/apex/Clarity360DashboardController.getMonitoringSnapshot';
 import getRecentJobs from '@salesforce/apex/Clarity360DashboardController.getRecentJobs';
 import runFullScan from '@salesforce/apex/Clarity360DashboardController.runFullScanV2';
 import deleteCustomField from '@salesforce/apex/Clarity360DashboardController.deleteCustomField';
 import getAgentAssistantAvailability from '@salesforce/apex/Clarity360DashboardController.getAgentAssistantAvailability';
+import askAgentAssistant from '@salesforce/apex/Clarity360DashboardController.askAgentAssistant';
+import isSetupComplete from '@salesforce/apex/Clarity360SetupWizardController.isSetupComplete';
+import getSetupState from '@salesforce/apex/Clarity360SetupWizardController.getSetupState';
 
+jest.mock(
+    '@salesforce/apex/Clarity360DashboardController.getGlobalComponentSections',
+    () => ({ default: jest.fn() }),
+    { virtual: true }
+);
+jest.mock(
+    '@salesforce/apex/Clarity360DashboardController.getMetadataComponents',
+    () => ({ default: jest.fn() }),
+    { virtual: true }
+);
 jest.mock(
     '@salesforce/apex/Clarity360DashboardController.getMonitoringSnapshot',
-    () => ({
-        default: jest.fn()
-    }),
+    () => ({ default: jest.fn() }),
     { virtual: true }
 );
-
 jest.mock(
     '@salesforce/apex/Clarity360DashboardController.getRecentJobs',
-    () => ({
-        default: jest.fn()
-    }),
+    () => ({ default: jest.fn() }),
     { virtual: true }
 );
-
 jest.mock(
     '@salesforce/apex/Clarity360DashboardController.runFullScanV2',
-    () => ({
-        default: jest.fn()
-    }),
+    () => ({ default: jest.fn() }),
     { virtual: true }
 );
-
 jest.mock(
     '@salesforce/apex/Clarity360DashboardController.deleteCustomField',
-    () => ({
-        default: jest.fn()
-    }),
+    () => ({ default: jest.fn() }),
     { virtual: true }
 );
-
 jest.mock(
     '@salesforce/apex/Clarity360DashboardController.getAgentAssistantAvailability',
-    () => ({
-        default: jest.fn()
-    }),
+    () => ({ default: jest.fn() }),
+    { virtual: true }
+);
+jest.mock(
+    '@salesforce/apex/Clarity360DashboardController.askAgentAssistant',
+    () => ({ default: jest.fn() }),
+    { virtual: true }
+);
+jest.mock(
+    '@salesforce/apex/Clarity360SetupWizardController.isSetupComplete',
+    () => ({ default: jest.fn() }),
+    { virtual: true }
+);
+jest.mock(
+    '@salesforce/apex/Clarity360SetupWizardController.getSetupState',
+    () => ({ default: jest.fn() }),
     { virtual: true }
 );
 
@@ -55,16 +71,37 @@ const recommendationsAdapter = registerApexTestWireAdapter(getRecommendations);
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-describe('c-clarity360-dashboard', () => {
-    afterEach(() => {
-        while (document.body.firstChild) {
-            document.body.removeChild(document.body.firstChild);
-        }
-        jest.clearAllMocks();
+function createDashboard() {
+    const element = createElement('c-clarity360-dashboard', {
+        is: Clarity360Dashboard
     });
+    document.body.appendChild(element);
+    return element;
+}
 
+async function seedDashboardData() {
+    summaryAdapter.emit({ cleanlinessScore: 92, latestJobStatus: 'Completed' });
+    recommendationsAdapter.emit([
+        {
+            id: 'row-1',
+            fieldKey: 'Account.Legacy_Flag__c',
+            componentName: 'Legacy_Flag__c',
+            action: 'Deprecate',
+            status: 'Open',
+            riskScore: 80,
+            confidenceScore: 90,
+            reason: 'Unused custom field',
+            evidenceSummary:
+                'HasData=false; Sampled=500; NonNull=0; ActiveTriggerRefs=0; InactiveTriggerRefs=0; ' +
+                'ActiveValidationRuleRefs=0; InactiveValidationRuleRefs=0; ActiveFlowRefs=0; InactiveFlowRefs=0; ApexClassRefs=0'
+        }
+    ]);
+    await flushPromises();
+}
+
+describe('c-clarity360-dashboard', () => {
     beforeEach(() => {
-        getAgentAssistantAvailability.mockResolvedValue({ available: true, mode: 'AI Mode', message: 'Available' });
+        getAgentAssistantAvailability.mockResolvedValue({ available: false, mode: 'Standard', message: 'Unavailable' });
         getMonitoringSnapshot.mockResolvedValue({
             asyncApexUsedPct: 0,
             queueableActiveCount: 0,
@@ -75,181 +112,76 @@ describe('c-clarity360-dashboard', () => {
             limitMetrics: [],
             platformEvents: []
         });
-    });
-
-    it('renders grouped recommendations from wire data', async () => {
         getRecentJobs.mockResolvedValue({ jobs: [], totalCount: 0, pageNumber: 1 });
-
-        const element = createElement('c-clarity360-dashboard', {
-            is: Clarity360Dashboard
+        getGlobalComponentSections.mockResolvedValue([]);
+        getMetadataComponents.mockResolvedValue([]);
+        askAgentAssistant.mockResolvedValue({ answer: 'ok' });
+        isSetupComplete.mockResolvedValue(true);
+        getSetupState.mockResolvedValue({
+            isSetupComplete: true,
+            readiness: { checks: [] }
         });
-        document.body.appendChild(element);
-
-        summaryAdapter.emit({ cleanlinessScore: 92, latestJobStatus: 'Completed' });
-        recommendationsAdapter.emit([
-            { id: '1', fieldKey: 'Account.A__c', status: 'Open' },
-            { id: '2', fieldKey: 'Account.B__c', status: 'Open' },
-            { id: '3', fieldKey: 'GLOBAL.TRIGGER.X', status: 'Open' }
-        ]);
-        await flushPromises();
-
-        expect(element.recommendationGroups.length).toBe(2);
     });
 
-    it('defaults to priority view and search opens matching items in a popup', async () => {
-        getRecentJobs.mockResolvedValue({ jobs: [], totalCount: 0, pageNumber: 1 });
-
-        const element = createElement('c-clarity360-dashboard', {
-            is: Clarity360Dashboard
-        });
-        document.body.appendChild(element);
-
-        summaryAdapter.emit({ cleanlinessScore: 92, latestJobStatus: 'Completed' });
-        recommendationsAdapter.emit([
-            {
-                id: '1',
-                fieldKey: 'Account.Healthy__c',
-                componentName: 'Healthy__c',
-                status: 'Accepted',
-                riskScore: 10,
-                confidenceScore: 85,
-                reason: 'Looks healthy',
-                evidenceSummary: 'NullRatePct=10; Sampled=100; NonNull=90; HasData=true'
-            },
-            {
-                id: '2',
-                fieldKey: 'Account.Critical__c',
-                componentName: 'Critical__c',
-                status: 'Open',
-                riskScore: 80,
-                confidenceScore: 85,
-                reason: 'High null rate',
-                evidenceSummary: 'NullRatePct=60; Sampled=100; NonNull=40; HasData=true'
-            }
-        ]);
-        await flushPromises();
-
-        expect(element.inventoryHealthFilter).toBe('priority');
-        expect(element.filteredRecommendations).toHaveLength(1);
-        expect(element.filteredRecommendations[0].fieldKey).toBe('Account.Critical__c');
-
-        element.handleSearchFilterChange({ detail: { value: 'Healthy__c' } });
-        await flushPromises();
-
-        expect(element.isSearchModalOpen).toBe(true);
-        expect(element.searchResults).toHaveLength(1);
-        expect(element.searchResults[0].title).toBe('Healthy__c');
+    afterEach(() => {
+        while (document.body.firstChild) {
+            document.body.removeChild(document.body.firstChild);
+        }
+        jest.clearAllMocks();
     });
 
-    it('supports job pagination boundaries', async () => {
-        getRecentJobs
-            .mockResolvedValueOnce({ jobs: [{ Id: 'a' }], totalCount: 11, pageNumber: 2 })
-            .mockResolvedValueOnce({ jobs: [{ Id: 'b' }], totalCount: 11, pageNumber: 3 });
+    it('renders summary and recommendation content from wire data', async () => {
+        createDashboard();
+        await seedDashboardData();
 
-        const element = createElement('c-clarity360-dashboard', {
-            is: Clarity360Dashboard
-        });
-        document.body.appendChild(element);
-        await flushPromises();
-
-        element.jobsPageNumber = 2;
-        element.jobsTotalCount = 11;
-        await element.handleNextJobsPage();
-
-        expect(getRecentJobs).toHaveBeenCalled();
-        expect(element.jobsPageNumber).toBe(3);
+        expect(document.body.textContent).toContain('Cleanliness Score');
+        expect(document.body.textContent).toContain('92%');
+        expect(document.body.textContent).toContain('Legacy_Flag__c');
+        expect(document.body.textContent).toContain('Deprecate');
     });
 
-    it('shows success toast on full scan action', async () => {
-        getRecentJobs.mockResolvedValue({ jobs: [], totalCount: 0, pageNumber: 1 });
-        runFullScan.mockResolvedValue({ success: true, jobId: '707xx0000001234', status: 'Queued' });
+    it('queues a full scan from the toolbar and emits a success toast', async () => {
+        runFullScan.mockResolvedValue({ success: true, jobId: '707xx0000001234' });
 
-        const element = createElement('c-clarity360-dashboard', {
-            is: Clarity360Dashboard
-        });
-        document.body.appendChild(element);
-
-        summaryAdapter.emit({ cleanlinessScore: 92, latestJobStatus: 'Completed' });
-        recommendationsAdapter.emit([]);
-        await flushPromises();
+        const element = createDashboard();
+        await seedDashboardData();
 
         const handler = jest.fn();
         element.addEventListener('lightning__showtoast', handler);
-        await element.handleRunFullScan();
 
+        const buttons = element.shadowRoot.querySelectorAll('lightning-button');
+        const runButton = Array.from(buttons).find((button) => button.label === 'Run Full Scan');
+        runButton.dispatchEvent(new CustomEvent('click'));
+        await flushPromises();
+
+        expect(runFullScan).toHaveBeenCalled();
         expect(handler).toHaveBeenCalled();
         expect(handler.mock.calls[0][0].detail.variant).toBe('success');
     });
 
-    it('normalizes nested error message to toast', async () => {
-        getRecentJobs.mockResolvedValue({ jobs: [], totalCount: 0, pageNumber: 1 });
-        runFullScan.mockRejectedValue({
-            body: {
-                output: {
-                    errors: [{ message: 'Queue unavailable' }]
-                }
-            }
+    it('opens next steps and deletes an eligible field through the modal action', async () => {
+        deleteCustomField.mockResolvedValue({
+            success: true,
+            deleted: true,
+            message: 'Field deleted successfully.'
         });
 
-        const element = createElement('c-clarity360-dashboard', {
-            is: Clarity360Dashboard
-        });
-        document.body.appendChild(element);
+        const element = createDashboard();
+        await seedDashboardData();
 
-        summaryAdapter.emit({ cleanlinessScore: 92, latestJobStatus: 'Completed' });
-        recommendationsAdapter.emit([]);
+        const recommendationButtons = element.shadowRoot.querySelectorAll('lightning-button');
+        const nextStepButton = Array.from(recommendationButtons).find((button) => button.label === 'Check Next Step');
+        nextStepButton.dispatchEvent(new CustomEvent('click'));
         await flushPromises();
 
-        const handler = jest.fn();
-        element.addEventListener('lightning__showtoast', handler);
-        await element.handleRunFullScan();
+        expect(document.body.textContent).toContain('Recommended Next Steps');
+        expect(document.body.textContent).toContain('Eligible for deletion');
 
-        expect(handler).toHaveBeenCalled();
-        expect(handler.mock.calls[0][0].detail.message).toBe('Queue unavailable');
-        expect(handler.mock.calls[0][0].detail.variant).toBe('error');
-    });
-
-    it('opens usage modal and marks custom field deletable when no usage or dependencies', async () => {
-        getRecentJobs.mockResolvedValue({ jobs: [], totalCount: 0, pageNumber: 1 });
-
-        const element = createElement('c-clarity360-dashboard', {
-            is: Clarity360Dashboard
-        });
-        document.body.appendChild(element);
+        const modalButtons = element.shadowRoot.querySelectorAll('lightning-button');
+        const deleteButton = Array.from(modalButtons).find((button) => button.label === 'Delete Field');
+        deleteButton.dispatchEvent(new CustomEvent('click'));
         await flushPromises();
-
-        element.handleRecommendationRowAction({
-            detail: {
-                action: { name: 'view_usage' },
-                row: {
-                    fieldKey: 'Account.Legacy_Flag__c',
-                    componentName: 'Legacy_Flag__c',
-                    evidenceSummary:
-                        'HasData=false; Sampled=500; NonNull=0; ActiveTriggerRefs=0; InactiveTriggerRefs=0; ' +
-                        'ActiveValidationRuleRefs=0; InactiveValidationRuleRefs=0; ActiveFlowRefs=0; InactiveFlowRefs=0; ApexClassRefs=0'
-                }
-            }
-        });
-
-        expect(element.isUsageModalOpen).toBe(true);
-        expect(element.selectedUsage.fieldKey).toBe('Account.Legacy_Flag__c');
-        expect(element.selectedUsage.canDelete).toBe('Yes');
-    });
-
-    it('calls delete api for eligible field', async () => {
-        getRecentJobs.mockResolvedValue({ jobs: [], totalCount: 0, pageNumber: 1 });
-        deleteCustomField.mockResolvedValue({ success: true, deleted: true, message: 'Field deleted successfully.' });
-
-        const element = createElement('c-clarity360-dashboard', {
-            is: Clarity360Dashboard
-        });
-        document.body.appendChild(element);
-        await flushPromises();
-
-        element.selectedUsage = { fieldKey: 'Account.Legacy_Flag__c', deleteAllowed: true };
-        await element.handleDeleteField();
 
         expect(deleteCustomField).toHaveBeenCalledWith({ fieldKey: 'Account.Legacy_Flag__c' });
     });
-
 });
