@@ -56,6 +56,7 @@ private class Clarity360ScheduleServiceTest {
         Clarity360SetupConfigService.SetupConfigDTO input = Clarity360SetupConfigService.load();
         input.isSetupComplete = true;
         input.enableScheduledScan = true;
+        input.scheduleFrequency = 'Weekly';
         Clarity360SetupConfigService.save(input);
 
         Test.startTest();
@@ -79,6 +80,7 @@ private class Clarity360ScheduleServiceTest {
         Clarity360SetupConfigService.SetupConfigDTO input = Clarity360SetupConfigService.load();
         input.isSetupComplete = true;
         input.enableScheduledScan = true;
+        input.scheduleFrequency = 'Weekly';
         Clarity360SetupConfigService.save(input);
 
         Test.startTest();

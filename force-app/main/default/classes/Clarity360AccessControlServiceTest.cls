@@ -24,11 +24,18 @@ private class Clarity360AccessControlServiceTest {
         Account original = new Account(Name = 'Readable');
 
         List<SObject> stripped = service.stripReadable(new List<SObject>{ original, null });
+        Account clonedRecord = (Account) stripped[0];
 
         System.assertEquals(2, stripped.size(), 'Readable strip should preserve list shape.');
         System.assertEquals(null, stripped[1], 'Null rows should remain null.');
-        System.assertNotEquals(original, stripped[0], 'Records should be cloned in tests.');
-        System.assertEquals('Readable', ((Account) stripped[0]).Name, 'Cloned readable record should preserve field values.');
+        System.assertEquals('Readable', clonedRecord.Name, 'Cloned readable record should preserve field values.');
+
+        clonedRecord.Name = 'Changed in clone';
+        System.assertEquals(
+            'Readable',
+            original.Name,
+            'Test-mode readable sanitization should return an independent clone, not the original instance.'
+        );
     }
 
     @IsTest
