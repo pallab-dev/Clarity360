@@ -205,14 +205,16 @@ jobs:
           while IFS= read -r test_class; do
             TEST_ARGS+=(--tests "$test_class")
           done < .ci/local-test-classes.txt
-          sf project deploy start \
+          DEPLOY_JSON=$(sf project deploy start \
             --target-org testorg \
             "${SOURCE_ARGS[@]}" \
             --ignore-conflicts \
             --dry-run \
             --test-level RunSpecifiedTests \
             "${TEST_ARGS[@]}" \
-            --wait 30
+            --wait 30 \
+            --json)
+          echo "$DEPLOY_JSON" > .ci/changed-apex-deploy.json
 
           MEMBER_NAMES=$(awk -F/ '
             /\.trigger$/ { sub(/\.trigger$/, "", $NF); print $NF }
@@ -222,32 +224,29 @@ jobs:
             echo "Unable to determine changed Apex member names."
             exit 1
           fi
-          IN_CLAUSE=""
-          while IFS= read -r member_name; do
-            if [ -n "$IN_CLAUSE" ]; then
-              IN_CLAUSE="${IN_CLAUSE},"
-            fi
-            IN_CLAUSE="${IN_CLAUSE}'${member_name}'"
-          done <<EOF
-          $MEMBER_NAMES
-          EOF
-          COVERAGE_JSON=$(sf data query \
-            --use-tooling-api \
-            --json \
-            --target-org testorg \
-            --query "SELECT ApexClassOrTrigger.Name, NumLinesCovered, NumLinesUncovered FROM ApexCodeCoverageAggregate WHERE ApexClassOrTrigger.Name IN (${IN_CLAUSE})")
-          echo "$COVERAGE_JSON" > .ci/changed-coverage.json
-          jq -r '.result.records[] | [.ApexClassOrTrigger.Name, .NumLinesCovered, .NumLinesUncovered] | @tsv' .ci/changed-coverage.json > .ci/changed-coverage.tsv
+          jq -r '.result.details.runTestResult.codeCoverage[] | [.name, .numLocations, .numLocationsNotCovered] | @tsv' \
+            .ci/changed-apex-deploy.json > .ci/changed-coverage-all.tsv
+          awk -F'\t' -v names="$MEMBER_NAMES" '
+            BEGIN {
+              split(names, allowed, /\n/);
+              for (idx in allowed) {
+                if (allowed[idx] != "") {
+                  wanted[allowed[idx]] = 1;
+                }
+              }
+            }
+            wanted[$1] { print $0 }
+          ' .ci/changed-coverage-all.tsv > .ci/changed-coverage.tsv
           if [ ! -s .ci/changed-coverage.tsv ]; then
-            echo "No coverage rows returned for changed Apex members."
+            echo "No deploy coverage rows returned for changed Apex members."
             exit 1
           fi
-          while IFS=$'\t' read -r member covered uncovered; do
-            total=$((covered + uncovered))
+          while IFS=$'\t' read -r member total uncovered; do
             if [ "$total" -eq 0 ]; then
               echo "No coverage data recorded for ${member}."
               exit 1
             fi
+            covered=$((total - uncovered))
             pct=$(awk "BEGIN { printf \"%.2f\", (${covered} / ${total}) * 100 }")
             echo "${member} coverage: ${pct}%"
             if ! awk "BEGIN {exit !(${pct} >= 75)}"; then
@@ -361,6 +360,15 @@ jobs:
             --code-coverage \
             --result-format human \
             --wait 30
+
+      - name: Run org-wide regression tests in Testing Org
+        run: |
+          sf apex run test \
+            --target-org testorg \
+            --test-level RunLocalTests \
+            --code-coverage \
+            --result-format human \
+            --wait 60
 
       - name: Clean up auth file
         if: always()
