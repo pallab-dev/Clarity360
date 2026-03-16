@@ -594,6 +594,7 @@ jobs:
       - scratch-org-package-smoke
     if: >-
       ${{
+        always() &&
         needs.testing-org-integration.result == 'success' &&
         needs.package-smoke-readiness.result == 'success' &&
         (
@@ -611,6 +612,7 @@ jobs:
     name: pr-pipeline
     runs-on: ubuntu-latest
     needs: manual-uat
+    if: ${{ always() && needs.manual-uat.result == 'success' }}
     steps:
       - name: Mark production PR validation successful
         run: echo "Production PR validation completed successfully."
