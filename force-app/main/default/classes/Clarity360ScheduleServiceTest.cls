@@ -1,5 +1,25 @@
 @IsTest
 private class Clarity360ScheduleServiceTest {
+    private class NullSetupConfigLoader extends ScanOrchestratorSchedulable.SetupConfigLoader {
+        public override Clarity360SetupConfigService.SetupConfigDTO load() {
+            return null;
+        }
+    }
+
+    private class ThrowingSetupConfigLoader extends ScanOrchestratorSchedulable.SetupConfigLoader {
+        public override Clarity360SetupConfigService.SetupConfigDTO load() {
+            throw new AuraHandledException('Simulated config failure');
+        }
+    }
+
+    @TestSetup
+    static void resetSchedulableDefaults() {
+        ScanOrchestratorSchedulable.skipFullScanInTests = false;
+        ScanOrchestratorSchedulable.setupConfigLoader = new ScanOrchestratorSchedulable.SetupConfigLoader();
+        ScanOrchestratorSchedulable.fullScanRunner = new ScanOrchestratorSchedulable.FullScanRunner();
+        FullScanQueueable.skipUsageBatchInTests = false;
+    }
+
     @IsTest
     static void syncScheduleCreatesScheduledJob() {
         ScanOrchestratorSchedulable.skipFullScanInTests = true;
@@ -110,6 +130,38 @@ private class Clarity360ScheduleServiceTest {
             0,
             [SELECT COUNT() FROM ScanJob__c],
             'Disabled scheduled scan config should not create a scan job.'
+        );
+    }
+
+    @IsTest
+    static void schedulableDoesNothingWhenConfigLoaderReturnsNull() {
+        delete [SELECT Id FROM ScanJob__c];
+        ScanOrchestratorSchedulable.setupConfigLoader = new NullSetupConfigLoader();
+
+        Test.startTest();
+        new ScanOrchestratorSchedulable().execute(null);
+        Test.stopTest();
+
+        System.assertEquals(
+            0,
+            [SELECT COUNT() FROM ScanJob__c],
+            'Null setup config should safely skip scheduled execution.'
+        );
+    }
+
+    @IsTest
+    static void schedulableSwallowsConfigLoadExceptions() {
+        delete [SELECT Id FROM ScanJob__c];
+        ScanOrchestratorSchedulable.setupConfigLoader = new ThrowingSetupConfigLoader();
+
+        Test.startTest();
+        new ScanOrchestratorSchedulable().execute(null);
+        Test.stopTest();
+
+        System.assertEquals(
+            0,
+            [SELECT COUNT() FROM ScanJob__c],
+            'Config load exceptions should be swallowed without creating scan jobs.'
         );
     }
 }
