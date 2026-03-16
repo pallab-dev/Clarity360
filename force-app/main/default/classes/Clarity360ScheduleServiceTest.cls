@@ -47,4 +47,67 @@ private class Clarity360ScheduleServiceTest {
         );
         ScanOrchestratorSchedulable.skipFullScanInTests = false;
     }
+
+    @IsTest
+    static void schedulableSkipsRunWhenTestBypassEnabled() {
+        delete [SELECT Id FROM ScanJob__c];
+        ScanOrchestratorSchedulable.skipFullScanInTests = true;
+
+        Clarity360SetupConfigService.SetupConfigDTO input = Clarity360SetupConfigService.load();
+        input.isSetupComplete = true;
+        input.enableScheduledScan = true;
+        Clarity360SetupConfigService.save(input);
+
+        Test.startTest();
+        new ScanOrchestratorSchedulable().execute(null);
+        Test.stopTest();
+
+        System.assertEquals(
+            0,
+            [SELECT COUNT() FROM ScanJob__c],
+            'Skip flag should prevent scheduled full scan execution in tests.'
+        );
+        ScanOrchestratorSchedulable.skipFullScanInTests = false;
+    }
+
+    @IsTest
+    static void schedulableRunsFullScanWhenConfigEnabled() {
+        delete [SELECT Id FROM ScanJob__c];
+        ScanOrchestratorSchedulable.skipFullScanInTests = false;
+        FullScanQueueable.skipUsageBatchInTests = true;
+
+        Clarity360SetupConfigService.SetupConfigDTO input = Clarity360SetupConfigService.load();
+        input.isSetupComplete = true;
+        input.enableScheduledScan = true;
+        Clarity360SetupConfigService.save(input);
+
+        Test.startTest();
+        new ScanOrchestratorSchedulable().execute(null);
+        Test.stopTest();
+
+        Integer jobCount = [SELECT COUNT() FROM ScanJob__c];
+        System.assert(jobCount > 0, 'Enabled scheduled scan should enqueue a scan job.');
+        FullScanQueueable.skipUsageBatchInTests = false;
+    }
+
+    @IsTest
+    static void schedulableDoesNothingWhenConfigDisabled() {
+        delete [SELECT Id FROM ScanJob__c];
+        ScanOrchestratorSchedulable.skipFullScanInTests = false;
+
+        Clarity360SetupConfigService.SetupConfigDTO input = Clarity360SetupConfigService.load();
+        input.isSetupComplete = true;
+        input.enableScheduledScan = false;
+        Clarity360SetupConfigService.save(input);
+
+        Test.startTest();
+        new ScanOrchestratorSchedulable().execute(null);
+        Test.stopTest();
+
+        System.assertEquals(
+            0,
+            [SELECT COUNT() FROM ScanJob__c],
+            'Disabled scheduled scan config should not create a scan job.'
+        );
+    }
 }
