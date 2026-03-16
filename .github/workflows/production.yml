@@ -374,11 +374,30 @@ jobs:
         if: always()
         run: rm -f testorg.sfdx-url
 
-  scratch-org-package-smoke:
-    name: Scratch Org Package Smoke
-    if: ${{ secrets.PACKAGE_ID != '' && secrets.DEVHUB_SFDX_URL != '' }}
+  package-smoke-readiness:
+    name: Package Smoke Readiness
     runs-on: ubuntu-latest
     needs: testing-org-integration
+    outputs:
+      package_smoke_enabled: ${{ steps.readiness.outputs.package_smoke_enabled }}
+    steps:
+      - name: Determine whether package smoke is configured
+        id: readiness
+        env:
+          DEVHUB_SFDX_URL: ${{ secrets.DEVHUB_SFDX_URL }}
+          PACKAGE_ID: ${{ secrets.PACKAGE_ID }}
+        run: |
+          if [ -n "$DEVHUB_SFDX_URL" ] && [ -n "$PACKAGE_ID" ]; then
+            echo "package_smoke_enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "package_smoke_enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  scratch-org-package-smoke:
+    name: Scratch Org Package Smoke
+    runs-on: ubuntu-latest
+    needs: package-smoke-readiness
+    if: ${{ needs.package-smoke-readiness.outputs.package_smoke_enabled == 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -571,10 +590,12 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - testing-org-integration
+      - package-smoke-readiness
       - scratch-org-package-smoke
     if: >-
       ${{
         needs.testing-org-integration.result == 'success' &&
+        needs.package-smoke-readiness.result == 'success' &&
         (
           needs.scratch-org-package-smoke.result == 'success' ||
           needs.scratch-org-package-smoke.result == 'skipped'
