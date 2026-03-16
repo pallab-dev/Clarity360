@@ -107,4 +107,4 @@ Add these secrets in GitHub Settings -> Secrets -> Actions.
 
 ## Release Flow
 
-After a PR is merged to `production`, the release workflow in [.github/workflows/production-release.yml](/Users/pallabsaikia/Downloads/Clarity360/.github/workflows/production-release.yml) promotes the package version when `.version-id` is present and creates a release tag.
+After a PR is merged to `production`, the release workflow in [.github/workflows/production-release.yml](/Users/pallabsaikia/Downloads/Clarity360/.github/workflows/production-release.yml) verifies that the PR validation workflow succeeded, then promotes the package version when `.version-id` is present and creates a release tag.
