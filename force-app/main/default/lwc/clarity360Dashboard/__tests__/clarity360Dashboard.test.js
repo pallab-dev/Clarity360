@@ -53,7 +53,7 @@ jest.mock(
 const summaryAdapter = registerApexTestWireAdapter(getDashboardSummary);
 const recommendationsAdapter = registerApexTestWireAdapter(getRecommendations);
 
-const flushPromises = () => new Promise(setImmediate);
+const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('c-clarity360-dashboard', () => {
     afterEach(() => {

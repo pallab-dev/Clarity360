@@ -130,7 +130,7 @@ jobs:
             echo "No LWC Jest tests detected."
             exit 0
           fi
-          npx sfdx-lwc-jest --runInBand
+          npm run test:unit:lwc
 
       - name: Validate changed XML files
         shell: bash
