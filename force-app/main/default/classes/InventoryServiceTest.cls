@@ -1,5 +1,13 @@
 @IsTest
 private class InventoryServiceTest {
+    @TestSetup
+    static void setupConfig() {
+        Clarity360SetupConfigService.SetupConfigDTO config = Clarity360SetupConfigService.load();
+        config.excludedObjects = null;
+        config.excludedNamespaces = null;
+        Clarity360SetupConfigService.save(config);
+    }
+
     @IsTest
     static void refreshInventoryCreatesRecords() {
         Test.startTest();
@@ -68,5 +76,43 @@ private class InventoryServiceTest {
         System.assertEquals(false, retained.IsActive__c, 'Excluded inventory should be marked inactive.');
         System.assertEquals(0, [SELECT COUNT() FROM UsageSignal__c WHERE FieldKey__c = 'Account.Legacy_Flag__c'], 'Usage signals for excluded inventory should be removed.');
         System.assertEquals(0, [SELECT COUNT() FROM Recommendation__c WHERE FieldKey__c = 'Account.Legacy_Flag__c'], 'Recommendations for excluded inventory should be removed.');
+    }
+
+    @IsTest
+    static void runtimeObjectAndNamespaceExclusionsAreApplied() {
+        Clarity360SetupConfigService.SetupConfigDTO config = Clarity360SetupConfigService.load();
+        config.excludedObjects = 'Account';
+        config.excludedNamespaces = 'ns1';
+        Clarity360SetupConfigService.save(config);
+
+        System.assertEquals(true, InventoryService.isObjectExcludedByRuntimeConfig('Account'));
+        System.assertEquals(true, InventoryService.isObjectExcludedByRuntimeConfig('ns1__ManagedObject__c'));
+        System.assertEquals(false, InventoryService.isObjectExcludedByRuntimeConfig('Contact'));
+        System.assertEquals(true, InventoryService.isObjectExcludedByRuntimeConfig(null));
+    }
+
+    @IsTest
+    static void recommendationScopeAndMetadataExclusionHelpersBehaveAsExpected() {
+        System.assertEquals(true, InventoryService.isObjectInRecommendationScope('FieldInventory__c'));
+        System.assertEquals(false, InventoryService.isObjectInRecommendationScope('DefinitelyMissingObject__c', false));
+        System.assertEquals(false, InventoryService.isObjectInRecommendationScope('ApexClass', false));
+        System.assertEquals(false, InventoryService.isObjectInRecommendationScope(null));
+
+        System.assertEquals(true, InventoryService.isExcludedMetadataObject('ApexClass'));
+        System.assertEquals(true, InventoryService.isExcludedMetadataObject('ApexWidget'));
+        System.assertEquals(false, InventoryService.isExcludedMetadataObject('Account'));
+        System.assertEquals(true, InventoryService.isExcludedMetadataObject(null));
+    }
+
+    @IsTest
+    static void chunkHelperHandlesOutOfRangeCursorAndScopedSelection() {
+        InventoryService.RefreshChunkResult emptyChunk =
+            InventoryService.refreshInventoryChunkForScopedObjects(new List<String>{ 'FieldInventory__c' }, true, 5, 1);
+        System.assertEquals(0, emptyChunk.scannedObjectCount, 'Out-of-range cursor should not scan any objects.');
+        System.assertEquals(false, emptyChunk.hasMore, 'Out-of-range cursor should not report more work.');
+
+        List<String> scopedStandard = InventoryService.getScopedObjectNames(false, 5);
+        System.assert(scopedStandard.size() > 0, 'Scoped object list should contain at least one object.');
+        System.assertEquals(true, scopedStandard[0].equalsIgnoreCase('Account'), 'Account should be prioritized when standard objects are allowed.');
     }
 }
