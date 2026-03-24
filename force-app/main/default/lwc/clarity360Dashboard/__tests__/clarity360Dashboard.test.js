@@ -265,13 +265,24 @@ describe('c-clarity360-dashboard', () => {
     });
 
     it('stores only a one-time override when opening readiness from the dashboard', async () => {
+        getSetupState.mockResolvedValue({
+            isSetupComplete: true,
+            readiness: {
+                checks: [
+                    {
+                        key: 'namedCredential',
+                        label: 'Named Credential',
+                        status: 'Warning',
+                        remediation: 'Open readiness.'
+                    }
+                ]
+            }
+        });
         const element = createDashboard();
         await seedDashboardData();
-        element.setupGuidanceItems = [
-            { key: 'namedCredential', status: 'Warning', whatToDo: 'Open readiness.' }
-        ];
-        element.setupComplete = true;
         await flushPromises();
+        await flushPromises();
+
         const buttons = element.shadowRoot.querySelectorAll('lightning-button');
         const readinessButton = Array.from(buttons).find((button) => button.label === 'Open Readiness');
         readinessButton.dispatchEvent(new CustomEvent('click'));

@@ -2198,10 +2198,12 @@ export default class Clarity360Dashboard extends NavigationMixin(LightningElemen
         }
         target.classList.add('tour-target-active');
         this.activeTourTargetElement = target;
-        try {
-            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        } catch {
-            target.scrollIntoView();
+        if (typeof target.scrollIntoView === 'function') {
+            try {
+                target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } catch {
+                target.scrollIntoView();
+            }
         }
         this.positionTourCoachmark(target);
     }
