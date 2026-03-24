@@ -2,6 +2,15 @@
  * @description Centralizes CRUD and field-level access enforcement for application services.
  */
 public with sharing class Clarity360AccessControlService {
+    private static final Set<String> INTERNAL_STORAGE_OBJECTS = new Set<String>{
+        'clarity360setupconfig__c',
+        'fieldinventory__c',
+        'metadatacomponentinventory__c',
+        'recommendation__c',
+        'scanjob__c',
+        'usagesignal__c'
+    };
+
     @TestVisible
     static AccessEvaluator accessEvaluator = new AccessEvaluator();
 
@@ -83,6 +92,9 @@ public with sharing class Clarity360AccessControlService {
         if (records == null || records.isEmpty()) {
             return new List<SObject>();
         }
+        if (shouldBypassFieldSecurity(records)) {
+            return cloneRecords(records);
+        }
         if (shouldCloneInTests()) {
             return cloneRecords(records);
         }
@@ -97,6 +109,9 @@ public with sharing class Clarity360AccessControlService {
     public List<SObject> stripForUpsert(List<SObject> records) {
         if (records == null || records.isEmpty()) {
             return new List<SObject>();
+        }
+        if (shouldBypassFieldSecurity(records)) {
+            return cloneRecords(records);
         }
         if (shouldCloneInTests()) {
             return cloneRecords(records);
@@ -136,6 +151,34 @@ public with sharing class Clarity360AccessControlService {
 
     private static Boolean shouldCloneInTests() {
         return Test.isRunningTest() && useSecurityStripInTests != true;
+    }
+
+    @TestVisible
+    static Boolean shouldBypassFieldSecurity(List<SObject> records) {
+        if (records == null || records.isEmpty()) {
+            return false;
+        }
+        for (SObject row : records) {
+            if (row == null) {
+                continue;
+            }
+            if (!isInternalStorageObject(row.getSObjectType())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    @TestVisible
+    static Boolean isInternalStorageObject(Schema.SObjectType objectType) {
+        if (objectType == null) {
+            return false;
+        }
+        try {
+            return INTERNAL_STORAGE_OBJECTS.contains(objectType.getDescribe().getName().toLowerCase());
+        } catch (Exception ex) {
+            return false;
+        }
     }
 
     private static List<SObject> cloneRecords(List<SObject> records) {

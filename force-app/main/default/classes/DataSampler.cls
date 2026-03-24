@@ -69,6 +69,8 @@ public with sharing class DataSampler {
         }
         Map<String, DependencySignalService.FieldDependencySummary> dependencyByField =
             DependencySignalService.scan(objectApiName, fieldApiNames);
+        Map<String, LayoutScanService.FieldLayoutSummary> layoutByField =
+            LayoutScanService.scanObject(objectApiName, fieldApiNames);
 
         for (FieldInventory__c inventory : fieldInventories) {
             Boolean isQueryable = queryableFields.contains(inventory.FieldApiName__c);
@@ -80,6 +82,8 @@ public with sharing class DataSampler {
             if (dependency == null) {
                 dependency = new DependencySignalService.FieldDependencySummary();
             }
+            LayoutScanService.FieldLayoutSummary layoutSummary = layoutByField.get(inventory.FieldApiName__c);
+            Boolean isOnLayout = layoutSummary != null && layoutSummary.isOnLayout == true;
 
             String evidence =
                 'Sampled=' + sampleSize +
@@ -95,6 +99,7 @@ public with sharing class DataSampler {
                 '; ActiveFlowRefs=' + dependency.activeFlowRefs +
                 '; InactiveFlowRefs=' + dependency.inactiveFlowRefs +
                 '; ApexClassRefs=' + dependency.apexClassRefs +
+                '; IsOnLayout=' + isOnLayout +
                 '; AvgApexCoveragePct=' + (
                     dependency.avgApexCoveragePct == null ? 'Unknown' : String.valueOf(dependency.avgApexCoveragePct)
                 );
@@ -108,7 +113,7 @@ public with sharing class DataSampler {
                 SampleSize__c = sampleSize,
                 NonNullCount__c = nonNullCount,
                 NullRatePct__c = nullRate,
-                IsOnLayout__c = false,
+                IsOnLayout__c = isOnLayout,
                 LastObservedOn__c = observedAt,
                 EvidenceSummary__c = evidence
             ));

@@ -124,6 +124,34 @@ private class Clarity360AccessControlServiceTest {
     }
 
     @IsTest
+    static void internalStorageObjectsBypassFieldSecurityStripping() {
+        Recommendation__c recommendation = new Recommendation__c(
+            FieldKey__c = 'Account.Legacy__c',
+            Action__c = 'Keep'
+        );
+        UsageSignal__c signal = new UsageSignal__c(
+            FieldKey__c = 'Account.Legacy__c',
+            SampleSize__c = 50
+        );
+
+        System.assertEquals(
+            true,
+            Clarity360AccessControlService.isInternalStorageObject(Recommendation__c.SObjectType),
+            'Recommendation storage should bypass field stripping.'
+        );
+        System.assertEquals(
+            true,
+            Clarity360AccessControlService.shouldBypassFieldSecurity(new List<SObject>{ recommendation, signal }),
+            'Internal storage records should bypass field stripping.'
+        );
+        System.assertEquals(
+            false,
+            Clarity360AccessControlService.shouldBypassFieldSecurity(new List<SObject>{ recommendation, new Account(Name = 'Nope') }),
+            'Mixed internal and external objects should not bypass field stripping.'
+        );
+    }
+
+    @IsTest
     static void stripForUpsertReturnsClonesForInsertAndUpdateRecords() {
         Clarity360AccessControlService service = new Clarity360AccessControlService();
 

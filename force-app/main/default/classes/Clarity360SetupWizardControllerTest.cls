@@ -76,8 +76,10 @@ private class Clarity360SetupWizardControllerTest {
                 'Task',
                 'pkg',
                 false,
-                false,
-                null,
+                true,
+                'Daily',
+                true,
+                'ops@example.com',
                 false
             );
         Test.stopTest();
@@ -97,6 +99,31 @@ private class Clarity360SetupWizardControllerTest {
         System.assertEquals(82, persisted.CoverageThreshold__c);
         System.assertEquals('Task', persisted.ExcludedObjects__c);
         System.assertEquals('pkg', persisted.ExcludedNamespaces__c);
+        System.assertEquals(true, saveResult.config.enableScheduledReports);
+        System.assertEquals('ops@example.com', saveResult.config.scheduledReportRecipient);
+    }
+
+    @IsTest
+    static void saveSetupChoicesAllowsBlankScheduledReportRecipient() {
+        Test.startTest();
+        Clarity360SetupWizardController.SaveResult saveResult =
+            Clarity360SetupWizardController.saveSetupChoices(
+                false,
+                80,
+                null,
+                null,
+                false,
+                true,
+                'Weekly',
+                true,
+                '',
+                false
+            );
+        Test.stopTest();
+
+        System.assertEquals(true, saveResult.success, 'Save should succeed when scheduled report recipient is blank.');
+        System.assertEquals(true, saveResult.config.enableScheduledReports);
+        System.assertEquals(null, saveResult.config.scheduledReportRecipient);
     }
 
     @IsTest

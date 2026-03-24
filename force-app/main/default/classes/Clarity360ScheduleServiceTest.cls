@@ -17,7 +17,7 @@ private class Clarity360ScheduleServiceTest {
         ScanOrchestratorSchedulable.skipFullScanInTests = false;
         ScanOrchestratorSchedulable.setupConfigLoader = new ScanOrchestratorSchedulable.SetupConfigLoader();
         ScanOrchestratorSchedulable.fullScanRunner = new ScanOrchestratorSchedulable.FullScanRunner();
-        FullScanQueueable.skipUsageBatchInTests = false;
+        ScanOrchestrator.skipUsageBatchInTests = false;
     }
 
     @IsTest
@@ -95,7 +95,7 @@ private class Clarity360ScheduleServiceTest {
     static void schedulableRunsFullScanWhenConfigEnabled() {
         delete [SELECT Id FROM ScanJob__c];
         ScanOrchestratorSchedulable.skipFullScanInTests = false;
-        FullScanQueueable.skipUsageBatchInTests = true;
+        ScanOrchestrator.skipUsageBatchInTests = true;
 
         Clarity360SetupConfigService.SetupConfigDTO input = Clarity360SetupConfigService.load();
         input.isSetupComplete = true;
@@ -109,7 +109,7 @@ private class Clarity360ScheduleServiceTest {
 
         Integer jobCount = [SELECT COUNT() FROM ScanJob__c];
         System.assert(jobCount > 0, 'Enabled scheduled scan should enqueue a scan job.');
-        FullScanQueueable.skipUsageBatchInTests = false;
+        ScanOrchestrator.skipUsageBatchInTests = false;
     }
 
     @IsTest
@@ -184,7 +184,7 @@ private class Clarity360ScheduleServiceTest {
     @IsTest
     static void defaultFullScanRunnerDispatchesFullScan() {
         delete [SELECT Id FROM ScanJob__c];
-        FullScanQueueable.skipUsageBatchInTests = true;
+        ScanOrchestrator.skipUsageBatchInTests = true;
 
         Test.startTest();
         new ScanOrchestratorSchedulable.FullScanRunner().run();
@@ -192,6 +192,6 @@ private class Clarity360ScheduleServiceTest {
 
         Integer jobCount = [SELECT COUNT() FROM ScanJob__c WHERE JobType__c = 'Full Scan'];
         System.assert(jobCount > 0, 'Default full scan runner should dispatch a full scan job.');
-        FullScanQueueable.skipUsageBatchInTests = false;
+        ScanOrchestrator.skipUsageBatchInTests = false;
     }
 }

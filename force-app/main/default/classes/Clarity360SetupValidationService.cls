@@ -381,16 +381,6 @@ public with sharing class Clarity360SetupValidationService {
 
         try {
             Boolean namedCredentialPresent = ToolingApiService.hasNamedCredentialConfigured();
-            if (preferNamedCredential && namedCredentialPresent) {
-                return buildItem(
-                    'namedCredential',
-                    'Named Credential',
-                    'Ready',
-                    'Clarity360Tooling named credential is present and preferred for Tooling API callouts.',
-                    'No action required.'
-                );
-            }
-
             if (!preferNamedCredential) {
                 ToolingApiService.ToolingQueryResult sessionResult = ToolingApiService.queryWithMode(
                     TOOLING_HEALTH_QUERY,

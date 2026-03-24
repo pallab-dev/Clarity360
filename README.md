@@ -80,6 +80,17 @@ The PR workflow includes both changed-file and full-source platform safety check
 
 These checks are intended to catch CRUD/FLS, sharing, governor limit, bulkification, and related secure coding issues before Testing Org or scratch org time is consumed.
 
+## Local Quality Gates
+
+Use the same checks locally before handing the package to another engineer:
+
+- `npm run lint`
+- `npm run test:unit:lwc`
+- `npm run lint:apex`
+- `npm run lint:apex:appexchange`
+
+The Apex PMD ruleset lives at [config/pmd-ruleset.xml](/Users/pallabsaikia/Downloads/Clarity360/config/pmd-ruleset.xml).
+
 ## Branch Protection Rules
 
 Configure these rules manually in GitHub Settings -> Branches.

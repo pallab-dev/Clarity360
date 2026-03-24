@@ -1,4 +1,7 @@
 public with sharing class ScanOrchestrator {
+    @TestVisible
+    static Boolean skipUsageBatchInTests = false;
+
     private class RuntimeOptions {
         public Boolean customObjectsOnly = false;
         public Integer maxInventoryObjects;
@@ -13,17 +16,36 @@ public with sharing class ScanOrchestrator {
     }
 
     public static Id runFullScan() {
-        return runFullScanV2(null).jobId;
+        return runFullScanV2(null, true, null).jobId;
     }
 
-    public static StartResult runFullScanV2(String requestId) {
+    public static StartResult runFullScanV2(String requestId, Boolean sendReport) {
+        return runFullScanV2(requestId, sendReport, null);
+    }
+
+    public static StartResult runFullScanV2(String requestId, Boolean sendReport, String reportRecipient) {
+        return startFullScan(requestId, sendReport == true ? 'Requester' : null, reportRecipient);
+    }
+
+    public static StartResult runScheduledFullScan() {
+        Clarity360SetupConfigService.SetupConfigDTO config = Clarity360SetupConfigService.load();
+        Boolean sendReport = config != null && config.enableScheduledReports == true;
+        return startFullScan(
+            null,
+            sendReport ? 'Scheduled' : null,
+            config == null ? null : config.scheduledReportRecipient
+        );
+    }
+
+    private static StartResult startFullScan(String requestId, String reportMode, String reportRecipient) {
         RuntimeOptions options = getRuntimeOptions();
         String scopeSummary =
             'customObjectsOnly=' + options.customObjectsOnly +
             '; maxInventoryObjects=' + options.maxInventoryObjects +
             '; maxScanObjects=' + options.maxScanObjects +
             '; sampleLimit=' + options.samplingLimit +
-            requestToken(requestId);
+            requestToken(requestId) +
+            reportToken(reportMode, reportRecipient);
         ScanJob__c existing = ScanJobRepository.findRecentRunningJob('Full Scan', requestId, 10);
         if (existing != null) {
             StartResult reusedResult = new StartResult();
@@ -37,16 +59,24 @@ public with sharing class ScanOrchestrator {
             JobType__c = 'Full Scan',
             Status__c = 'Queued',
             StartedOn__c = System.now(),
-            ScopeSummary__c = scopeSummary
+            ScopeSummary__c = scopeSummary,
+            ReportMode__c = reportMode
         );
         insertScanJobWithStorageRecovery(job);
         try {
-            System.enqueueJob(new FullScanQueueable(
+            System.enqueueJob(new InventoryRefreshQueueable(
                 job.Id,
                 options.customObjectsOnly,
                 options.maxInventoryObjects,
+                null,
+                0,
+                0,
+                0,
+                0,
+                true,
                 options.samplingLimit,
-                options.maxScanObjects
+                options.maxScanObjects,
+                Test.isRunningTest() && skipUsageBatchInTests
             ));
             StartResult queuedResult = new StartResult();
             queuedResult.jobId = job.Id;
@@ -63,6 +93,31 @@ public with sharing class ScanOrchestrator {
             Clarity360SecureLog.error('ScanOrchestrator.runFullScanV2', ex);
             throw ex;
         }
+    }
+
+    private static String reportToken(String reportMode, String reportRecipient) {
+        if (String.isBlank(reportMode)) {
+            return '';
+        }
+
+        String token = '; reportRequested=true; reportMode=' + reportMode;
+        String safeRecipient = sanitizeReportRecipient(reportRecipient);
+        if (!String.isBlank(safeRecipient)) {
+            token += '; reportRecipient=' + safeRecipient;
+        }
+        return token;
+    }
+
+    @TestVisible
+    static String sanitizeReportRecipient(String reportRecipient) {
+        if (String.isBlank(reportRecipient)) {
+            return null;
+        }
+        String sanitized = reportRecipient.trim().replace(';', '').replace('\n', '').replace('\r', '');
+        if (String.isBlank(sanitized)) {
+            return null;
+        }
+        return sanitized.length() > 80 ? sanitized.substring(0, 80) : sanitized;
     }
 
     public static Id runInventoryOnly(Boolean customObjectsOnly, Integer maxObjects) {

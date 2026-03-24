@@ -16,8 +16,10 @@ public with sharing class Clarity360SetupConfigService {
         @AuraEnabled public Boolean enableDependencyAnalysis;
         @AuraEnabled public Boolean enableLayoutScan;
         @AuraEnabled public Boolean enableScheduledScan;
+        @AuraEnabled public Boolean enableScheduledReports;
         @AuraEnabled public Boolean enableGlobalRecommendations;
         @AuraEnabled public Boolean enableDeletionGuardrails;
+        @AuraEnabled public String scheduledReportRecipient;
     }
 
     public static SetupConfigDTO load() {
@@ -55,10 +57,13 @@ public with sharing class Clarity360SetupConfigService {
             safeBoolean(safeInput.enableDependencyAnalysis, target.EnableDependencyAnalysis__c);
         target.EnableLayoutScan__c = safeBoolean(safeInput.enableLayoutScan, target.EnableLayoutScan__c);
         target.EnableScheduledScan__c = scheduleToggle;
+        target.EnableScheduledReports__c = safeBoolean(safeInput.enableScheduledReports, false);
         target.EnableGlobalRecommendations__c =
             safeBoolean(safeInput.enableGlobalRecommendations, target.EnableGlobalRecommendations__c);
         target.EnableDeletionGuardrails__c =
             safeBoolean(safeInput.enableDeletionGuardrails, target.EnableDeletionGuardrails__c);
+        target.ScheduledReportRecipient__c =
+            safeInput.enableScheduledReports == true ? trimToLength(safeInput.scheduledReportRecipient, 80) : null;
 
         upsert target;
         return toDto(target);
@@ -74,6 +79,9 @@ public with sharing class Clarity360SetupConfigService {
         }
         if ((input.enableScheduledScan == true || input.scheduleEnabled == true) && String.isBlank(input.scheduleFrequency)) {
             throw new AuraHandledException('Schedule frequency is required when scheduled scans are enabled.');
+        }
+        if (input.enableScheduledReports == true && !(input.enableScheduledScan == true || input.scheduleEnabled == true)) {
+            throw new AuraHandledException('Scheduled reports can be enabled only when scheduled scans are enabled.');
         }
     }
 
@@ -93,8 +101,10 @@ public with sharing class Clarity360SetupConfigService {
         dto.enableDependencyAnalysis = null;
         dto.enableLayoutScan = null;
         dto.enableScheduledScan = false;
+        dto.enableScheduledReports = false;
         dto.enableGlobalRecommendations = null;
         dto.enableDeletionGuardrails = null;
+        dto.scheduledReportRecipient = null;
         return dto;
     }
 
@@ -116,8 +126,10 @@ public with sharing class Clarity360SetupConfigService {
         dto.enableDependencyAnalysis = row.EnableDependencyAnalysis__c;
         dto.enableLayoutScan = row.EnableLayoutScan__c;
         dto.enableScheduledScan = row.EnableScheduledScan__c;
+        dto.enableScheduledReports = row.EnableScheduledReports__c;
         dto.enableGlobalRecommendations = row.EnableGlobalRecommendations__c;
         dto.enableDeletionGuardrails = row.EnableDeletionGuardrails__c;
+        dto.scheduledReportRecipient = row.ScheduledReportRecipient__c;
         return dto;
     }
 
@@ -158,8 +170,10 @@ public with sharing class Clarity360SetupConfigService {
         normalized.enableDependencyAnalysis = input.enableDependencyAnalysis;
         normalized.enableLayoutScan = input.enableLayoutScan;
         normalized.enableScheduledScan = input.enableScheduledScan;
+        normalized.enableScheduledReports = input.enableScheduledReports;
         normalized.enableGlobalRecommendations = input.enableGlobalRecommendations;
         normalized.enableDeletionGuardrails = input.enableDeletionGuardrails;
+        normalized.scheduledReportRecipient = input.scheduledReportRecipient;
         return normalized;
     }
 
@@ -204,8 +218,10 @@ public with sharing class Clarity360SetupConfigService {
                     EnableDependencyAnalysis__c,
                     EnableLayoutScan__c,
                     EnableScheduledScan__c,
+                    EnableScheduledReports__c,
                     EnableGlobalRecommendations__c,
-                    EnableDeletionGuardrails__c
+                    EnableDeletionGuardrails__c,
+                    ScheduledReportRecipient__c
                 FROM Clarity360SetupConfig__c
                 WHERE Id = :preferredId
                 LIMIT 1
@@ -240,8 +256,10 @@ public with sharing class Clarity360SetupConfigService {
                 EnableDependencyAnalysis__c,
                 EnableLayoutScan__c,
                 EnableScheduledScan__c,
+                EnableScheduledReports__c,
                 EnableGlobalRecommendations__c,
-                EnableDeletionGuardrails__c
+                EnableDeletionGuardrails__c,
+                ScheduledReportRecipient__c
             FROM Clarity360SetupConfig__c
             ORDER BY LastModifiedDate DESC, CreatedDate DESC
             LIMIT 1

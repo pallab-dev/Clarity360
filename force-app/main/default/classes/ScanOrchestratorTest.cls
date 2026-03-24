@@ -29,11 +29,11 @@ private class ScanOrchestratorTest {
 
     @IsTest
     static void runFullScanCreatesAndFinishesJob() {
-        FullScanQueueable.skipUsageBatchInTests = true;
+        ScanOrchestrator.skipUsageBatchInTests = true;
         Test.startTest();
         Id jobId = ScanOrchestrator.runFullScan();
         Test.stopTest();
-        FullScanQueueable.skipUsageBatchInTests = false;
+        ScanOrchestrator.skipUsageBatchInTests = false;
 
         ScanJob__c job = [
             SELECT Id, Status__c
@@ -46,6 +46,39 @@ private class ScanOrchestratorTest {
             job.Status__c == 'Completed' || job.Status__c == 'Partial',
             'Job should finish as completed or partial depending on object accessibility in test context.'
         );
+    }
+
+    @IsTest
+    static void inventoryScopeSummaryPreservesReportTokens() {
+        String merged = InventoryRefreshQueueable.preserveNonInventoryTokens(
+            'customObjectsOnly=true; reportRequested=true; reportMode=Requester; reportRecipient=ops@example.com; requestId=123',
+            'InventoryObjects=4; InventoryFields=30; Inactivated=2'
+        );
+
+        System.assert(merged.contains('InventoryObjects=4'));
+        System.assert(merged.contains('reportRequested=true'));
+        System.assert(merged.contains('reportMode=Requester'));
+        System.assert(merged.contains('reportRecipient=ops@example.com'));
+        System.assert(merged.contains('requestId=123'));
+    }
+
+    @IsTest
+    static void runFullScanV2StoresExplicitRecipient() {
+        ScanOrchestrator.skipUsageBatchInTests = true;
+        Test.startTest();
+        ScanOrchestrator.StartResult result = ScanOrchestrator.runFullScanV2('req-report', true, 'ops@example.com');
+        Test.stopTest();
+        ScanOrchestrator.skipUsageBatchInTests = false;
+
+        ScanJob__c job = [
+            SELECT ScopeSummary__c, ReportMode__c
+            FROM ScanJob__c
+            WHERE Id = :result.jobId
+            LIMIT 1
+        ];
+
+        System.assertEquals('Requester', job.ReportMode__c);
+        System.assert(job.ScopeSummary__c.contains('reportRecipient=ops@example.com'));
     }
 
     @IsTest

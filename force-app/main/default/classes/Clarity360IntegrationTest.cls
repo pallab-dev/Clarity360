@@ -97,7 +97,7 @@ private class Clarity360IntegrationTest {
 
     @IsTest
     static void fullScanCompletesWithSetupConfig() {
-        FullScanQueueable.skipUsageBatchInTests = true;
+        ScanOrchestrator.skipUsageBatchInTests = true;
         Clarity360SetupConfigService.SetupConfigDTO config = Clarity360SetupConfigService.load();
         config.isSetupComplete = true;
         config.scopeMode = 'CustomOnly';
@@ -106,7 +106,7 @@ private class Clarity360IntegrationTest {
         Test.startTest();
         Id jobId = ScanOrchestrator.runFullScan();
         Test.stopTest();
-        FullScanQueueable.skipUsageBatchInTests = false;
+        ScanOrchestrator.skipUsageBatchInTests = false;
 
         ScanJob__c job = [
             SELECT Status__c

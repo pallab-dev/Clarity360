@@ -16,7 +16,7 @@ public with sharing class ScanOrchestratorSchedulable implements Schedulable {
 
     public virtual class FullScanRunner {
         public virtual void run() {
-            ScanOrchestrator.runFullScan();
+            ScanOrchestrator.runScheduledFullScan();
         }
     }
 

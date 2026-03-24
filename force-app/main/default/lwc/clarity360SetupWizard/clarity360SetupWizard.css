@@ -9,6 +9,28 @@
     background: #ffffff;
 }
 
+.tour-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: flex-start;
+}
+
+.tour-summary {
+    border: 1px solid #d9e7f7;
+    border-radius: 0.6rem;
+    background: linear-gradient(135deg, #f5f9ff 0%, #ffffff 100%);
+    color: #34506f;
+    padding: 0.7rem 0.8rem;
+}
+
+.tour-step-count {
+    color: #5c6b80;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
 .readiness-group {
     border: 1px solid #d8dde6;
     border-radius: 0.5rem;
@@ -147,6 +169,10 @@
 }
 
 @media (max-width: 640px) {
+    .tour-head {
+        flex-direction: column;
+    }
+
     .group-toggle {
         grid-template-columns: 1.25rem minmax(0, 1fr);
     }
