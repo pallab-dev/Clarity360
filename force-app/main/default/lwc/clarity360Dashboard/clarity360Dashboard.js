@@ -317,7 +317,6 @@ export default class Clarity360Dashboard extends NavigationMixin(LightningElemen
     userDisplayName = '';
     viewportTourSyncHandler;
     pendingTourSync = false;
-    tourSyncFrame;
 
     actionOptions = [
         { label: 'All Actions', value: '' },
@@ -367,10 +366,6 @@ export default class Clarity360Dashboard extends NavigationMixin(LightningElemen
         if (this.viewportTourSyncHandler) {
             window.removeEventListener('resize', this.viewportTourSyncHandler);
             window.removeEventListener('scroll', this.viewportTourSyncHandler, true);
-        }
-        if (this.tourSyncFrame) {
-            window.cancelAnimationFrame(this.tourSyncFrame);
-            this.tourSyncFrame = null;
         }
     }
 
@@ -1863,13 +1858,7 @@ export default class Clarity360Dashboard extends NavigationMixin(LightningElemen
     renderedCallback() {
         if (this.pendingTourSync) {
             this.pendingTourSync = false;
-            if (this.tourSyncFrame) {
-                window.cancelAnimationFrame(this.tourSyncFrame);
-            }
-            this.tourSyncFrame = window.requestAnimationFrame(() => {
-                this.tourSyncFrame = null;
-                this.syncTourTarget();
-            });
+            this.syncTourTarget();
         }
     }
 
@@ -2199,19 +2188,12 @@ export default class Clarity360Dashboard extends NavigationMixin(LightningElemen
         if (!this.isTourOpen) {
             return;
         }
-        this.syncTourTargetWithRetry(0);
-    }
-
-    syncTourTargetWithRetry(attemptNumber) {
         const targetId = this.currentTourStep?.targetId;
         if (!targetId || !this.template) {
             return;
         }
         const target = this.template.querySelector(`[data-tour-id="${targetId}"]`);
         if (!target) {
-            if (attemptNumber < 5) {
-                window.setTimeout(() => this.syncTourTargetWithRetry(attemptNumber + 1), 80);
-            }
             return;
         }
         target.classList.add('tour-target-active');
