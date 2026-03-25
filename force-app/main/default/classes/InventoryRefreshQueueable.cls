@@ -96,6 +96,7 @@ public with sharing class InventoryRefreshQueueable implements Queueable {
             } while (Test.isRunningTest() && chunk.hasMore == true);
 
             updateProgress(chunk.totalObjects, scannedSoFar, upsertedSoFar, inactivatedSoFar);
+            GovernorTrendService.captureCurrentTransaction(scanJobId, 'InventoryRefresh');
 
             if (chunk.hasMore == true) {
                 System.enqueueJob(new InventoryRefreshQueueable(
@@ -126,6 +127,7 @@ public with sharing class InventoryRefreshQueueable implements Queueable {
         }
     }
 
+    @TestVisible
     private void updateProgress(Integer totalObjects, Integer scanned, Integer upserted, Integer inactivated) {
         if (scanJobId == null) {
             return;
@@ -140,10 +142,7 @@ public with sharing class InventoryRefreshQueueable implements Queueable {
             Id = scanJobId,
             Status__c = 'Running',
             ProgressPct__c = progress,
-            ScopeSummary__c =
-                'InventoryObjects=' + scanned +
-                '; InventoryFields=' + upserted +
-                '; Inactivated=' + inactivated
+            ScopeSummary__c = buildInventoryScopeSummary(scanned, upserted, inactivated)
         ));
     }
 
@@ -157,13 +156,12 @@ public with sharing class InventoryRefreshQueueable implements Queueable {
             Status__c = 'Completed',
             ProgressPct__c = 100,
             FinishedOn__c = System.now(),
-            ScopeSummary__c =
-                'InventoryObjects=' + scanned +
-                '; InventoryFields=' + upserted +
-                '; Inactivated=' + inactivated
+            ScopeSummary__c = buildInventoryScopeSummary(scanned, upserted, inactivated)
         ));
+        Clarity360ScanReportService.notifyIfNeeded(scanJobId);
     }
 
+    @TestVisible
     private void launchUsageBatchOrComplete(Integer scanned, Integer upserted, Integer inactivated) {
         if (scanJobId == null) {
             return;
@@ -177,14 +175,12 @@ public with sharing class InventoryRefreshQueueable implements Queueable {
         ScanJobRepository.safeUpdate(new ScanJob__c(
             Id = scanJobId,
             Status__c = 'Running',
-            ScopeSummary__c =
-                'InventoryObjects=' + scanned +
-                '; InventoryFields=' + upserted +
-                '; Inactivated=' + inactivated
+            ScopeSummary__c = buildInventoryScopeSummary(scanned, upserted, inactivated)
         ));
         Database.executeBatch(new UsageScanBatch(usageSampleLimit, usageMaxObjects, scanJobId), 1);
     }
 
+    @TestVisible
     private void markFailed(Exception ex) {
         if (scanJobId == null) {
             return;
@@ -196,5 +192,58 @@ public with sharing class InventoryRefreshQueueable implements Queueable {
             FinishedOn__c = System.now(),
             ErrorMessage__c = ex == null ? 'Unknown inventory refresh failure' : ex.getMessage()
         ));
+        Clarity360ScanReportService.notifyIfNeeded(scanJobId);
+    }
+
+    @TestVisible
+    private String buildInventoryScopeSummary(Integer scanned, Integer upserted, Integer inactivated) {
+        String inventorySummary =
+            'InventoryObjects=' + scanned +
+            '; InventoryFields=' + upserted +
+            '; Inactivated=' + inactivated;
+
+        if (scanJobId == null) {
+            return inventorySummary;
+        }
+
+        try {
+            List<ScanJob__c> rows = [
+                SELECT ScopeSummary__c
+                FROM ScanJob__c
+                WHERE Id = :scanJobId
+                LIMIT 1
+            ];
+            if (rows.isEmpty()) {
+                return inventorySummary;
+            }
+            return preserveNonInventoryTokens(rows[0].ScopeSummary__c, inventorySummary);
+        } catch (Exception ex) {
+            return inventorySummary;
+        }
+    }
+
+    @TestVisible
+    static String preserveNonInventoryTokens(String existingSummary, String inventorySummary) {
+        List<String> tokens = new List<String>();
+        tokens.add(String.isBlank(inventorySummary) ? '' : inventorySummary);
+
+        if (!String.isBlank(existingSummary)) {
+            for (String token : existingSummary.split(';')) {
+                String trimmed = token == null ? null : token.trim();
+                if (String.isBlank(trimmed)) {
+                    continue;
+                }
+                if (
+                    trimmed.startsWith('InventoryObjects=') ||
+                    trimmed.startsWith('InventoryFields=') ||
+                    trimmed.startsWith('Inactivated=')
+                ) {
+                    continue;
+                }
+                tokens.add(trimmed);
+            }
+        }
+
+        return String.join(tokens, '; ');
     }
 }

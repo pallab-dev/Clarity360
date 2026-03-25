@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>ScheduledReportRecipient__c</fullName>
+    <description>Email address that receives scheduled full scan reports.</description>
+    <externalId>false</externalId>
+    <inlineHelpText>Email address that receives scheduled full scan reports when scheduled reporting is enabled.</inlineHelpText>
+    <label>Scheduled Report Recipient</label>
+    <required>false</required>
+    <type>Email</type>
+</CustomField>

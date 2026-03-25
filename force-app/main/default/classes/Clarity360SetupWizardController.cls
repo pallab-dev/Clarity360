@@ -58,6 +58,8 @@ public with sharing class Clarity360SetupWizardController {
         Boolean useNamedCredential,
         Boolean enableScheduledScan,
         String scheduleFrequency,
+        Boolean enableScheduledReports,
+        String scheduledReportRecipient,
         Boolean markSetupComplete
     ) {
         Clarity360SetupConfigService.SetupConfigDTO input = Clarity360SetupConfigService.load();
@@ -73,6 +75,8 @@ public with sharing class Clarity360SetupWizardController {
         input.enableScheduledScan = enableScheduledScan;
         input.scheduleEnabled = enableScheduledScan;
         input.scheduleFrequency = scheduleFrequency;
+        input.enableScheduledReports = enableScheduledReports;
+        input.scheduledReportRecipient = scheduledReportRecipient;
         return saveInternal(input, markSetupComplete);
     }
 
@@ -102,8 +106,10 @@ public with sharing class Clarity360SetupWizardController {
                 completionCandidate.enableDependencyAnalysis = safeInput.enableDependencyAnalysis;
                 completionCandidate.enableLayoutScan = safeInput.enableLayoutScan;
                 completionCandidate.enableScheduledScan = safeInput.enableScheduledScan;
+                completionCandidate.enableScheduledReports = safeInput.enableScheduledReports;
                 completionCandidate.enableGlobalRecommendations = safeInput.enableGlobalRecommendations;
                 completionCandidate.enableDeletionGuardrails = safeInput.enableDeletionGuardrails;
+                completionCandidate.scheduledReportRecipient = safeInput.scheduledReportRecipient;
                 Clarity360Settings.ValidationResult validation =
                     Clarity360Settings.validateRuntimeSetupCompletion(completionCandidate);
                 if (validation.valid != true) {

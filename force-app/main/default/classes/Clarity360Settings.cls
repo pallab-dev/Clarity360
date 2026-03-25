@@ -1,4 +1,6 @@
 public with sharing class Clarity360Settings {
+    private static final String DEFAULT_CONFIG_DEVELOPER_NAME = 'Default';
+
     public class ConfigurationException extends Exception {}
 
     public class Values {
@@ -29,10 +31,13 @@ public with sharing class Clarity360Settings {
     public class RuntimeConfig {
         public Boolean includeStandardObjects = false;
         public Boolean useNamedCredential = false;
+        public Boolean enableLayoutScan = false;
         public Boolean enableScheduledScan = false;
+        public Boolean enableScheduledReports = false;
         public String excludedObjects;
         public String excludedNamespaces;
         public String scheduleFrequency;
+        public String scheduledReportRecipient;
         public Decimal coverageThreshold;
 
         public Boolean enableFieldRecommendations;
@@ -73,7 +78,7 @@ public with sharing class Clarity360Settings {
                 ' MaxInventoryObjects__c,' +
                 ' MaxScanObjects__c' +
                 ' FROM Clarity360Config__mdt' +
-                ' WHERE DeveloperName = \'Default\'' +
+                ' WHERE DeveloperName = \'' + DEFAULT_CONFIG_DEVELOPER_NAME + '\'' +
                 ' LIMIT 1'
             );
 
@@ -85,24 +90,7 @@ public with sharing class Clarity360Settings {
             SObject row = rows[0];
             Values values = new Values();
             values.metadataPresent = true;
-            values.enableFieldRecommendations =
-                (Boolean) row.get('EnableFieldRecommendations__c');
-            values.enableTriggerScan =
-                (Boolean) row.get('EnableTriggerScan__c');
-            values.enableValidationRuleScan =
-                (Boolean) row.get('EnableValidationRuleScan__c');
-            values.enableFlowAndProcessScan =
-                (Boolean) row.get('EnableFlowAndProcessScan__c');
-            values.enableWorkflowRuleScan =
-                (Boolean) row.get('EnableWorkflowRuleScan__c');
-            values.enableApexCoverageScan =
-                (Boolean) row.get('EnableApexCoverageScan__c');
-            values.minObjectRecordCount = toInteger((Decimal) row.get('MinObjectRecordCount__c'));
-            values.apexCoverageThresholdPct = (Decimal) row.get('ApexCoverageThresholdPct__c');
-            values.maxToolingRows = toInteger((Decimal) row.get('MaxToolingRows__c'));
-            values.samplingLimit = toInteger((Decimal) row.get('SamplingLimit__c'));
-            values.maxInventoryObjects = toInteger((Decimal) row.get('MaxInventoryObjects__c'));
-            values.maxScanObjects = toInteger((Decimal) row.get('MaxScanObjects__c'));
+            applyMetadataValues(values, row);
             cached = values;
             return cached;
         } catch (Exception ex) {
@@ -152,18 +140,7 @@ public with sharing class Clarity360Settings {
         RuntimeConfig runtime = new RuntimeConfig();
         Values metadata = get();
         if (metadata != null) {
-            runtime.enableFieldRecommendations = metadata.enableFieldRecommendations;
-            runtime.enableTriggerScan = metadata.enableTriggerScan;
-            runtime.enableValidationRuleScan = metadata.enableValidationRuleScan;
-            runtime.enableFlowAndProcessScan = metadata.enableFlowAndProcessScan;
-            runtime.enableWorkflowRuleScan = metadata.enableWorkflowRuleScan;
-            runtime.enableApexCoverageScan = metadata.enableApexCoverageScan;
-            runtime.minObjectRecordCount = metadata.minObjectRecordCount;
-            runtime.apexCoverageThresholdPct = metadata.apexCoverageThresholdPct;
-            runtime.maxToolingRows = metadata.maxToolingRows;
-            runtime.samplingLimit = metadata.samplingLimit;
-            runtime.maxInventoryObjects = metadata.maxInventoryObjects;
-            runtime.maxScanObjects = metadata.maxScanObjects;
+            applyRuntimeMetadata(runtime, metadata);
         }
 
         Clarity360SetupConfigService.SetupConfigDTO userSettings = Clarity360SetupConfigService.load();
@@ -171,10 +148,13 @@ public with sharing class Clarity360Settings {
             String effectiveScope = effectiveScopeMode(userSettings);
             runtime.includeStandardObjects = effectiveScope == 'IncludeStandard';
             runtime.useNamedCredential = userSettings.useNamedCredential == true;
+            runtime.enableLayoutScan = userSettings.enableLayoutScan == true;
             runtime.enableScheduledScan = userSettings.enableScheduledScan == true || userSettings.scheduleEnabled == true;
+            runtime.enableScheduledReports = userSettings.enableScheduledReports == true;
             runtime.excludedObjects = userSettings.excludedObjects;
             runtime.excludedNamespaces = userSettings.excludedNamespaces;
             runtime.scheduleFrequency = userSettings.scheduleFrequency;
+            runtime.scheduledReportRecipient = userSettings.scheduledReportRecipient;
             runtime.coverageThreshold = effectiveCoverageThreshold(userSettings);
         }
 
@@ -274,6 +254,36 @@ public with sharing class Clarity360Settings {
 
     private static Integer toInteger(Decimal input) {
         return input == null ? null : Integer.valueOf(input.intValue());
+    }
+
+    private static void applyMetadataValues(Values values, SObject row) {
+        values.enableFieldRecommendations = (Boolean) row.get('EnableFieldRecommendations__c');
+        values.enableTriggerScan = (Boolean) row.get('EnableTriggerScan__c');
+        values.enableValidationRuleScan = (Boolean) row.get('EnableValidationRuleScan__c');
+        values.enableFlowAndProcessScan = (Boolean) row.get('EnableFlowAndProcessScan__c');
+        values.enableWorkflowRuleScan = (Boolean) row.get('EnableWorkflowRuleScan__c');
+        values.enableApexCoverageScan = (Boolean) row.get('EnableApexCoverageScan__c');
+        values.minObjectRecordCount = toInteger((Decimal) row.get('MinObjectRecordCount__c'));
+        values.apexCoverageThresholdPct = (Decimal) row.get('ApexCoverageThresholdPct__c');
+        values.maxToolingRows = toInteger((Decimal) row.get('MaxToolingRows__c'));
+        values.samplingLimit = toInteger((Decimal) row.get('SamplingLimit__c'));
+        values.maxInventoryObjects = toInteger((Decimal) row.get('MaxInventoryObjects__c'));
+        values.maxScanObjects = toInteger((Decimal) row.get('MaxScanObjects__c'));
+    }
+
+    private static void applyRuntimeMetadata(RuntimeConfig runtime, Values metadata) {
+        runtime.enableFieldRecommendations = metadata.enableFieldRecommendations;
+        runtime.enableTriggerScan = metadata.enableTriggerScan;
+        runtime.enableValidationRuleScan = metadata.enableValidationRuleScan;
+        runtime.enableFlowAndProcessScan = metadata.enableFlowAndProcessScan;
+        runtime.enableWorkflowRuleScan = metadata.enableWorkflowRuleScan;
+        runtime.enableApexCoverageScan = metadata.enableApexCoverageScan;
+        runtime.minObjectRecordCount = metadata.minObjectRecordCount;
+        runtime.apexCoverageThresholdPct = metadata.apexCoverageThresholdPct;
+        runtime.maxToolingRows = metadata.maxToolingRows;
+        runtime.samplingLimit = metadata.samplingLimit;
+        runtime.maxInventoryObjects = metadata.maxInventoryObjects;
+        runtime.maxScanObjects = metadata.maxScanObjects;
     }
 
     private static void requireBoolean(ValidationResult result, Boolean value, String fieldName) {

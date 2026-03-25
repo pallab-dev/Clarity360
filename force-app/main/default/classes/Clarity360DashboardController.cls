@@ -49,6 +49,7 @@ public with sharing class Clarity360DashboardController {
         @AuraEnabled public String displayName;
         @AuraEnabled public Integer referenceCount;
         @AuraEnabled public Integer activeSubscriberCount;
+        @AuraEnabled public Integer activePublisherCount;
         @AuraEnabled public Boolean monitoringEligible;
         @AuraEnabled public Datetime lastScannedOn;
         @AuraEnabled public String sourceSummary;
@@ -80,6 +81,40 @@ public with sharing class Clarity360DashboardController {
         @AuraEnabled public Integer pageSize;
     }
 
+    public class HygieneRow {
+        @AuraEnabled public String key;
+        @AuraEnabled public String name;
+        @AuraEnabled public String detail;
+        @AuraEnabled public String context;
+    }
+
+    public class HygieneSection {
+        @AuraEnabled public String key;
+        @AuraEnabled public String label;
+        @AuraEnabled public String description;
+        @AuraEnabled public String emptyMessage;
+        @AuraEnabled public Integer totalCount;
+        @AuraEnabled public List<HygieneRow> rows;
+    }
+
+    public class AdminHygieneSnapshot {
+        @AuraEnabled public Integer inactiveUserCount;
+        @AuraEnabled public Integer unusedProfileCount;
+        @AuraEnabled public Integer unassignedPermissionSetCount;
+        @AuraEnabled public Integer unassignedPermissionSetGroupCount;
+        @AuraEnabled public Integer emptyRoleCount;
+        @AuraEnabled public Integer emptyGroupOrQueueCount;
+        @AuraEnabled public List<HygieneSection> sections;
+    }
+
+    public class FieldDetailEvidence {
+        @AuraEnabled public String fieldKey;
+        @AuraEnabled public Boolean isOnLayout;
+        @AuraEnabled public List<String> layoutNames;
+        @AuraEnabled public Integer signalHistoryCount;
+        @AuraEnabled public String latestEvidenceSummary;
+    }
+
     public class LimitMetricRow {
         @AuraEnabled public String key;
         @AuraEnabled public String label;
@@ -94,19 +129,49 @@ public with sharing class Clarity360DashboardController {
         @AuraEnabled public String apiName;
         @AuraEnabled public String displayName;
         @AuraEnabled public Integer activeSubscriberCount;
+        @AuraEnabled public Integer activePublisherCount;
         @AuraEnabled public Integer referenceCount;
         @AuraEnabled public Datetime lastScannedOn;
     }
 
+    public class ScanTrendRow {
+        @AuraEnabled public Id scanJobId;
+        @AuraEnabled public String jobType;
+        @AuraEnabled public Datetime finishedOn;
+        @AuraEnabled public Decimal avgCpuMs;
+        @AuraEnabled public Decimal avgHeapKb;
+        @AuraEnabled public Integer totalSoqlQueries;
+        @AuraEnabled public Integer asyncActiveJobs;
+        @AuraEnabled public Decimal dailyApiRequestsPct;
+        @AuraEnabled public Decimal dailyAsyncApexPct;
+    }
+
     public class MonitoringSnapshot {
         @AuraEnabled public Decimal asyncApexUsedPct;
+        @AuraEnabled public Integer asyncJobsToday;
         @AuraEnabled public Integer queueableActiveCount;
         @AuraEnabled public Integer batchActiveCount;
         @AuraEnabled public Integer scheduledJobCount;
         @AuraEnabled public Integer platformEventCount;
         @AuraEnabled public Integer activePlatformSubscriberCount;
+        @AuraEnabled public Integer activePlatformPublisherCount;
         @AuraEnabled public List<LimitMetricRow> limitMetrics;
         @AuraEnabled public List<EventMonitorRow> platformEvents;
+        @AuraEnabled public List<ScanTrendRow> scanTrends;
+    }
+
+    public class MonitoringDetailItem {
+        @AuraEnabled public String label;
+        @AuraEnabled public String value;
+    }
+
+    public class MonitoringDetail {
+        @AuraEnabled public String detailType;
+        @AuraEnabled public String title;
+        @AuraEnabled public String subtitle;
+        @AuraEnabled public String summary;
+        @AuraEnabled public List<String> highlights;
+        @AuraEnabled public List<MonitoringDetailItem> items;
     }
 
     public class OperationResult {
@@ -229,13 +294,15 @@ public with sharing class Clarity360DashboardController {
         if (String.isBlank(safeType)) {
             queried = [
                 SELECT Id, ComponentKey__c, ComponentType__c, ApiName__c, DisplayName__c, ReferenceCount__c,
-                    ActiveSubscriberCount__c, MonitoringEligible__c, LastScannedOn__c, SourceSummary__c
+                    ActiveSubscriberCount__c, ActivePublisherCount__c, MonitoringEligible__c,
+                    LastScannedOn__c, SourceSummary__c
                 FROM MetadataComponentInventory__c
                 WHERE IsActive__c = true
                     AND (
                     MonitoringEligible__c = true
                     OR ReferenceCount__c > 0
                     OR ActiveSubscriberCount__c > 0
+                    OR ActivePublisherCount__c > 0
                 )
                 ORDER BY ReferenceCount__c DESC, LastScannedOn__c DESC, ApiName__c ASC
                 LIMIT :safeLimit
@@ -243,7 +310,8 @@ public with sharing class Clarity360DashboardController {
         } else {
             queried = [
                 SELECT Id, ComponentKey__c, ComponentType__c, ApiName__c, DisplayName__c, ReferenceCount__c,
-                    ActiveSubscriberCount__c, MonitoringEligible__c, LastScannedOn__c, SourceSummary__c
+                    ActiveSubscriberCount__c, ActivePublisherCount__c, MonitoringEligible__c,
+                    LastScannedOn__c, SourceSummary__c
                 FROM MetadataComponentInventory__c
                 WHERE IsActive__c = true
                 AND ComponentType__c = :safeType
@@ -251,6 +319,7 @@ public with sharing class Clarity360DashboardController {
                     MonitoringEligible__c = true
                     OR ReferenceCount__c > 0
                     OR ActiveSubscriberCount__c > 0
+                    OR ActivePublisherCount__c > 0
                 )
                 ORDER BY ReferenceCount__c DESC, LastScannedOn__c DESC, ApiName__c ASC
                 LIMIT :safeLimit
@@ -267,6 +336,7 @@ public with sharing class Clarity360DashboardController {
             row.displayName = raw.DisplayName__c;
             row.referenceCount = raw.ReferenceCount__c == null ? 0 : raw.ReferenceCount__c.intValue();
             row.activeSubscriberCount = raw.ActiveSubscriberCount__c == null ? 0 : raw.ActiveSubscriberCount__c.intValue();
+            row.activePublisherCount = raw.ActivePublisherCount__c == null ? 0 : raw.ActivePublisherCount__c.intValue();
             row.monitoringEligible = raw.MonitoringEligible__c;
             row.lastScannedOn = raw.LastScannedOn__c;
             row.sourceSummary = raw.SourceSummary__c;
@@ -415,6 +485,51 @@ public with sharing class Clarity360DashboardController {
     }
 
     @AuraEnabled(cacheable=true)
+    public static FieldDetailEvidence getFieldDetailEvidence(String fieldKey) {
+        Clarity360AccessControlService access = Clarity360AccessControlService.get();
+        access.assertReadable(UsageSignal__c.SObjectType, 'FieldDetailEvidence');
+        access.assertReadable(FieldInventory__c.SObjectType, 'FieldDetailEvidence');
+        FieldDetailEvidence detail = new FieldDetailEvidence();
+        detail.fieldKey = fieldKey;
+        detail.layoutNames = new List<String>();
+        if (String.isBlank(fieldKey) || !isSafeFieldKey(fieldKey)) {
+            return detail;
+        }
+
+        List<UsageSignal__c> rows = [
+            SELECT Id, IsOnLayout__c, EvidenceSummary__c
+            FROM UsageSignal__c
+            WHERE FieldKey__c = :fieldKey
+            ORDER BY LastObservedOn__c DESC
+            LIMIT 25
+        ];
+        detail.signalHistoryCount = rows.size();
+        if (!rows.isEmpty()) {
+            detail.isOnLayout = rows[0].IsOnLayout__c;
+            detail.latestEvidenceSummary = rows[0].EvidenceSummary__c;
+        } else {
+            detail.isOnLayout = false;
+        }
+
+        List<FieldInventory__c> inventoryRows = [
+            SELECT ObjectApiName__c, FieldApiName__c
+            FROM FieldInventory__c
+            WHERE FieldKey__c = :fieldKey
+            LIMIT 1
+        ];
+        if (!inventoryRows.isEmpty()) {
+            detail.layoutNames = LayoutScanService.getLayoutNamesForField(
+                inventoryRows[0].ObjectApiName__c,
+                inventoryRows[0].FieldApiName__c
+            );
+            if (!detail.layoutNames.isEmpty()) {
+                detail.isOnLayout = true;
+            }
+        }
+        return detail;
+    }
+
+    @AuraEnabled(cacheable=true)
     public static RecentJobsPage getRecentJobs(Integer pageNumber, Integer pageSize) {
         Clarity360AccessControlService access = Clarity360AccessControlService.get();
         access.assertReadable(ScanJob__c.SObjectType, 'RecentJobs');
@@ -442,13 +557,44 @@ public with sharing class Clarity360DashboardController {
     }
 
     @AuraEnabled(cacheable=true)
+    public static AdminHygieneSnapshot getAdminHygieneSnapshot() {
+        Integer rowLimit = 20;
+        AdminHygieneSnapshot snapshot = new AdminHygieneSnapshot();
+        snapshot.sections = new List<HygieneSection>();
+
+        HygieneSection inactiveUsers = buildInactiveUsersSection(rowLimit);
+        HygieneSection unassignedPermissionSets = buildUnassignedPermissionSetsSection(rowLimit);
+        HygieneSection unassignedPermissionSetGroups = buildUnassignedPermissionSetGroupsSection(rowLimit);
+
+        snapshot.inactiveUserCount = inactiveUsers.totalCount;
+        snapshot.unusedProfileCount = 0;
+        snapshot.unassignedPermissionSetCount = unassignedPermissionSets.totalCount;
+        snapshot.unassignedPermissionSetGroupCount = unassignedPermissionSetGroups.totalCount;
+        snapshot.emptyRoleCount = 0;
+        snapshot.emptyGroupOrQueueCount = 0;
+        snapshot.sections.add(inactiveUsers);
+        snapshot.sections.add(unassignedPermissionSets);
+        snapshot.sections.add(unassignedPermissionSetGroups);
+        return snapshot;
+    }
+
+    @AuraEnabled(cacheable=true)
     public static MonitoringSnapshot getMonitoringSnapshot() {
         Clarity360AccessControlService access = Clarity360AccessControlService.get();
         access.assertReadable(MetadataComponentInventory__c.SObjectType, 'MonitoringSnapshot');
 
         MonitoringSnapshot snapshot = new MonitoringSnapshot();
+        snapshot.asyncApexUsedPct = 0;
+        snapshot.asyncJobsToday = 0;
+        snapshot.queueableActiveCount = 0;
+        snapshot.batchActiveCount = 0;
+        snapshot.scheduledJobCount = 0;
+        snapshot.platformEventCount = 0;
+        snapshot.activePlatformSubscriberCount = 0;
+        snapshot.activePlatformPublisherCount = 0;
         snapshot.limitMetrics = new List<LimitMetricRow>();
         snapshot.platformEvents = new List<EventMonitorRow>();
+        snapshot.scanTrends = new List<ScanTrendRow>();
 
         try {
             Map<String, System.OrgLimit> limitsByName = System.OrgLimits.getMap();
@@ -462,6 +608,15 @@ public with sharing class Clarity360DashboardController {
 
         LimitMetricRow asyncMetric = findMetric(snapshot.limitMetrics, 'DailyAsyncApexExecutions');
         snapshot.asyncApexUsedPct = asyncMetric == null ? 0 : asyncMetric.pctUsed;
+        try {
+            snapshot.asyncJobsToday = [
+                SELECT COUNT()
+                FROM AsyncApexJob
+                WHERE CreatedDate = TODAY
+            ];
+        } catch (Exception ex) {
+            Clarity360SecureLog.warn('Dashboard.getMonitoringSnapshot.asyncToday', ex);
+        }
 
         try {
             snapshot.queueableActiveCount = [
@@ -491,12 +646,12 @@ public with sharing class Clarity360DashboardController {
 
         try {
             for (MetadataComponentInventory__c row : [
-                SELECT Id, ApiName__c, DisplayName__c, ActiveSubscriberCount__c, ReferenceCount__c, LastScannedOn__c
+                SELECT Id, ApiName__c, DisplayName__c, ActiveSubscriberCount__c, ActivePublisherCount__c,
+                    ReferenceCount__c, LastScannedOn__c
                 FROM MetadataComponentInventory__c
                 WHERE ComponentType__c = 'Platform Event'
                 AND IsActive__c = true
-                AND (ActiveSubscriberCount__c > 0 OR ReferenceCount__c > 0)
-                ORDER BY ActiveSubscriberCount__c DESC, ReferenceCount__c DESC, ApiName__c ASC
+                ORDER BY ActiveSubscriberCount__c DESC, ActivePublisherCount__c DESC, ReferenceCount__c DESC, ApiName__c ASC
                 LIMIT 100
             ]) {
                 EventMonitorRow eventRow = new EventMonitorRow();
@@ -505,22 +660,81 @@ public with sharing class Clarity360DashboardController {
                 eventRow.displayName = row.DisplayName__c;
                 eventRow.activeSubscriberCount =
                     row.ActiveSubscriberCount__c == null ? 0 : row.ActiveSubscriberCount__c.intValue();
+                eventRow.activePublisherCount =
+                    row.ActivePublisherCount__c == null ? 0 : row.ActivePublisherCount__c.intValue();
                 eventRow.referenceCount = row.ReferenceCount__c == null ? 0 : row.ReferenceCount__c.intValue();
                 eventRow.lastScannedOn = row.LastScannedOn__c;
                 snapshot.platformEvents.add(eventRow);
                 snapshot.activePlatformSubscriberCount += eventRow.activeSubscriberCount;
+                snapshot.activePlatformPublisherCount += eventRow.activePublisherCount;
             }
         } catch (Exception ex) {
             Clarity360SecureLog.warn('Dashboard.getMonitoringSnapshot.platformEvents', ex);
         }
+        try {
+            EvidenceParser parser = EvidenceParser.get();
+            for (ScanJob__c job : [
+                SELECT Id, JobType__c, FinishedOn__c, GovernorSummary__c
+                FROM ScanJob__c
+                WHERE FinishedOn__c != null
+                ORDER BY FinishedOn__c DESC, CreatedDate DESC
+                LIMIT 25
+            ]) {
+                if (String.isBlank(job.GovernorSummary__c)) {
+                    continue;
+                }
+                Map<String, String> parsed = parser.parse(job.GovernorSummary__c);
+                ScanTrendRow trend = new ScanTrendRow();
+                trend.scanJobId = job.Id;
+                trend.jobType = job.JobType__c;
+                trend.finishedOn = job.FinishedOn__c;
+                trend.avgCpuMs = parser.getDecimal(parsed, 'AvgCpuMs', 0);
+                trend.avgHeapKb = parser.getDecimal(parsed, 'AvgHeapKb', 0);
+                trend.totalSoqlQueries = parser.getInteger(parsed, 'SoqlTotal', 0);
+                trend.asyncActiveJobs = parser.getInteger(parsed, 'AsyncActiveJobs', 0);
+                trend.dailyApiRequestsPct = parser.getDecimal(parsed, 'DailyApiRequestsPct', 0);
+                trend.dailyAsyncApexPct = parser.getDecimal(parsed, 'DailyAsyncApexPct', 0);
+                snapshot.scanTrends.add(trend);
+                if (snapshot.scanTrends.size() >= 10) {
+                    break;
+                }
+            }
+        } catch (Exception ex) {
+            Clarity360SecureLog.warn('Dashboard.getMonitoringSnapshot.scanTrends', ex);
+        }
         snapshot.platformEventCount = snapshot.platformEvents.size();
         return snapshot;
+    }
+
+    @AuraEnabled(cacheable=true)
+    public static MonitoringDetail getMonitoringDetail(String detailType, String recordKey) {
+        if (String.isBlank(detailType) || String.isBlank(recordKey)) {
+            return null;
+        }
+
+        String normalized = detailType.trim().toLowerCase();
+        if (normalized == 'platformevent') {
+            return getPlatformEventMonitoringDetail(recordKey);
+        }
+        if (normalized == 'scantrend') {
+            return getScanTrendDetail(recordKey);
+        }
+        if (normalized == 'asynctoday') {
+            return getAsyncJobsTodayDetail();
+        }
+        if (normalized == 'salesforcesignal') {
+            return getSalesforceSignalDetail(recordKey);
+        }
+        return null;
     }
 
     private static String buildMetadataWhyVisible(MetadataComponentRow row) {
         List<String> reasons = new List<String>();
         if ((row == null ? 0 : row.activeSubscriberCount) > 0) {
             reasons.add('has active subscribers');
+        }
+        if ((row == null ? 0 : row.activePublisherCount) > 0) {
+            reasons.add('has active publishers');
         }
         if ((row == null ? 0 : row.referenceCount) > 0) {
             reasons.add('is referenced by metadata or code');
@@ -539,8 +753,8 @@ public with sharing class Clarity360DashboardController {
             return 'Refresh metadata inventory after the next scan.';
         }
         if (row.componentType == 'Platform Event') {
-            if (row.activeSubscriberCount > 0) {
-                return 'Review subscribers and confirm each event is still required before cleanup.';
+            if (row.activeSubscriberCount > 0 || row.activePublisherCount > 0) {
+                return 'Review publishers and subscribers before deciding whether this event can be retired.';
             }
             return 'Confirm whether this event should remain monitored or be retired.';
         }
@@ -548,6 +762,419 @@ public with sharing class Clarity360DashboardController {
             return 'Review dependencies before changing or removing this metadata.';
         }
         return 'No action is needed yet. Keep it visible for monitoring and refresh after the next scan.';
+    }
+
+    private static MonitoringDetail getPlatformEventMonitoringDetail(String recordKey) {
+        Clarity360AccessControlService access = Clarity360AccessControlService.get();
+        access.assertReadable(MetadataComponentInventory__c.SObjectType, 'MonitoringDetail');
+        List<MetadataComponentInventory__c> rows = [
+            SELECT Id, ApiName__c, DisplayName__c, ReferenceCount__c, ActiveSubscriberCount__c,
+                ActivePublisherCount__c, MonitoringEligible__c, LastScannedOn__c, SourceSummary__c
+            FROM MetadataComponentInventory__c
+            WHERE Id = :recordKey
+            LIMIT 1
+        ];
+        if (rows.isEmpty()) {
+            return null;
+        }
+
+        MetadataComponentInventory__c row = rows[0];
+        MetadataComponentRow summaryRow = new MetadataComponentRow();
+        summaryRow.componentType = 'Platform Event';
+        summaryRow.referenceCount = row.ReferenceCount__c == null ? 0 : row.ReferenceCount__c.intValue();
+        summaryRow.activeSubscriberCount = row.ActiveSubscriberCount__c == null ? 0 : row.ActiveSubscriberCount__c.intValue();
+        summaryRow.activePublisherCount = row.ActivePublisherCount__c == null ? 0 : row.ActivePublisherCount__c.intValue();
+        summaryRow.monitoringEligible = row.MonitoringEligible__c;
+
+        MonitoringDetail detail = new MonitoringDetail();
+        detail.detailType = 'platformEvent';
+        detail.title = String.isBlank(row.DisplayName__c) ? row.ApiName__c : row.DisplayName__c;
+        detail.subtitle = 'Platform Event';
+        detail.summary = buildMetadataWhyVisible(summaryRow);
+        detail.highlights = new List<String>{
+            buildMetadataNextStep(summaryRow),
+            summaryRow.referenceCount == 0
+                ? 'No publishers, subscribers, or references were detected in the latest scan snapshot.'
+                : 'This event has at least one active publisher, subscriber, or scanned reference.'
+        };
+        detail.items = buildMonitoringItems(new List<List<String>>{
+            new List<String>{ 'API Name', row.ApiName__c },
+            new List<String>{ 'Publishers', String.valueOf(summaryRow.activePublisherCount) },
+            new List<String>{ 'Subscribers', String.valueOf(summaryRow.activeSubscriberCount) },
+            new List<String>{ 'References', String.valueOf(summaryRow.referenceCount) },
+            new List<String>{ 'Monitoring Eligible', String.valueOf(row.MonitoringEligible__c) },
+            new List<String>{ 'Last Scanned', formatMonitoringDatetime(row.LastScannedOn__c) },
+            new List<String>{ 'Stored Summary', String.isBlank(row.SourceSummary__c) ? 'None' : humanizeSummary(row.SourceSummary__c) }
+        });
+        return detail;
+    }
+
+    private static MonitoringDetail getScanTrendDetail(String recordKey) {
+        List<ScanJob__c> rows = [
+            SELECT Id, Name, JobType__c, FinishedOn__c, GovernorSummary__c
+            FROM ScanJob__c
+            WHERE Id = :recordKey
+            LIMIT 1
+        ];
+        if (rows.isEmpty()) {
+            return null;
+        }
+
+        ScanJob__c row = rows[0];
+        EvidenceParser parser = EvidenceParser.get();
+        Map<String, String> parsed = parser.parse(row.GovernorSummary__c);
+
+        MonitoringDetail detail = new MonitoringDetail();
+        detail.detailType = 'scanTrend';
+        detail.title = String.isBlank(row.Name) ? row.JobType__c : row.Name;
+        detail.subtitle = String.isBlank(row.JobType__c) ? 'Scan Trend' : row.JobType__c;
+        detail.summary = 'This trend row is built from the governor summary captured during the scan transactions.';
+        detail.highlights = new List<String>{
+            'Use this to compare scan cost over time, not as a direct org-limit source of truth.',
+            'Daily API and async percentages in this section come from Salesforce org limits at the moment each scan snapshot was captured.'
+        };
+        detail.items = buildMonitoringItems(new List<List<String>>{
+            new List<String>{ 'Finished', formatMonitoringDatetime(row.FinishedOn__c) },
+            new List<String>{ 'Transactions Captured', parser.getString(parsed, 'TxnCount') },
+            new List<String>{ 'Average CPU (ms)', parser.getString(parsed, 'AvgCpuMs') },
+            new List<String>{ 'Average Heap (KB)', parser.getString(parsed, 'AvgHeapKb') },
+            new List<String>{ 'Total SOQL', parser.getString(parsed, 'SoqlTotal') },
+            new List<String>{ 'Async Jobs Seen', parser.getString(parsed, 'AsyncActiveJobs') },
+            new List<String>{ 'Daily API %', parser.getString(parsed, 'DailyApiRequestsPct') },
+            new List<String>{ 'Daily Async %', parser.getString(parsed, 'DailyAsyncApexPct') },
+            new List<String>{ 'Last Phase', parser.getString(parsed, 'LastPhase') },
+            new List<String>{ 'Captured On', parser.getString(parsed, 'LastCapturedOn') }
+        });
+        return detail;
+    }
+
+    private static MonitoringDetail getAsyncJobsTodayDetail() {
+        MonitoringDetail detail = new MonitoringDetail();
+        detail.detailType = 'asyncToday';
+        detail.title = 'Async Jobs Today';
+        detail.subtitle = 'Today\'s async Apex activity';
+        detail.summary = 'This breakdown comes from AsyncApexJob records created today. It is an activity view, not a governor-limit counter.';
+        detail.highlights = new List<String>{
+            'Use this to see what actually ran today by async type.',
+            'This does not replace Salesforce-reported governor-limit usage.'
+        };
+
+        List<MonitoringDetailItem> items = new List<MonitoringDetailItem>();
+        try {
+            for (AggregateResult row : [
+                SELECT JobType jobType, COUNT(Id) totalCount
+                FROM AsyncApexJob
+                WHERE CreatedDate = TODAY
+                GROUP BY JobType
+                ORDER BY COUNT(Id) DESC
+                LIMIT 20
+            ]) {
+                MonitoringDetailItem item = new MonitoringDetailItem();
+                item.label = String.valueOf(row.get('jobType'));
+                item.value = String.valueOf(row.get('totalCount'));
+                items.add(item);
+            }
+        } catch (Exception ex) {
+            Clarity360SecureLog.warn('Dashboard.getAsyncJobsTodayDetail', ex);
+        }
+
+        if (items.isEmpty()) {
+            items.addAll(buildMonitoringItems(new List<List<String>>{
+                new List<String>{ 'Today', 'No async job records found.' }
+            }));
+        }
+        detail.items = items;
+        return detail;
+    }
+
+    private static MonitoringDetail getSalesforceSignalDetail(String recordKey) {
+        if (String.isBlank(recordKey)) {
+            return null;
+        }
+        String normalized = recordKey.trim().toLowerCase();
+        if (normalized == 'async-jobs-today') {
+            return getAsyncJobsTodayDetail();
+        }
+        if (normalized == 'queueable-active') {
+            return getAsyncSignalDetail('Queueable Active', 'Queueable jobs currently active or waiting.', 'Queueable');
+        }
+        if (normalized == 'batch-active') {
+            return getAsyncSignalDetail('Batch Active', 'Batch Apex jobs currently active or queued.', 'BatchApex');
+        }
+        if (normalized == 'scheduled-jobs') {
+            return getScheduledJobsDetail();
+        }
+        return null;
+    }
+
+    private static MonitoringDetail getAsyncSignalDetail(String title, String summary, String jobTypeValue) {
+        MonitoringDetail detail = new MonitoringDetail();
+        detail.detailType = 'salesforceSignal';
+        detail.title = title;
+        detail.subtitle = 'AsyncApexJob';
+        detail.summary = summary;
+        detail.highlights = new List<String>{
+            'This detail is a live activity view from AsyncApexJob, not a governor-limit calculation.',
+            'Use this to see where the current queue pressure is coming from.'
+        };
+
+        List<MonitoringDetailItem> items = new List<MonitoringDetailItem>();
+        try {
+            for (AggregateResult row : [
+                SELECT ApexClass.Name className, Status statusValue, COUNT(Id) totalCount
+                FROM AsyncApexJob
+                WHERE JobType = :jobTypeValue
+                AND Status IN ('Holding', 'Preparing', 'Processing', 'Queued')
+                GROUP BY ApexClass.Name, Status
+                ORDER BY COUNT(Id) DESC
+                LIMIT 20
+            ]) {
+                MonitoringDetailItem item = new MonitoringDetailItem();
+                item.label = String.valueOf(row.get('className')) + ' (' + String.valueOf(row.get('statusValue')) + ')';
+                item.value = String.valueOf(row.get('totalCount'));
+                items.add(item);
+            }
+        } catch (Exception ex) {
+            Clarity360SecureLog.warn('Dashboard.getAsyncSignalDetail', ex);
+        }
+
+        if (items.isEmpty()) {
+            items.addAll(buildMonitoringItems(new List<List<String>>{
+                new List<String>{ 'Current Activity', 'No matching active records were found.' }
+            }));
+        }
+        detail.items = items;
+        return detail;
+    }
+
+    private static MonitoringDetail getScheduledJobsDetail() {
+        MonitoringDetail detail = new MonitoringDetail();
+        detail.detailType = 'salesforceSignal';
+        detail.title = 'Scheduled Jobs';
+        detail.subtitle = 'CronTrigger';
+        detail.summary = 'This detail shows the currently scheduled Apex jobs in the org.';
+        detail.highlights = new List<String>{
+            'This is an org-wide scheduled job view.',
+            'Use this to see which schedulers are currently registered, not which jobs ran today.'
+        };
+
+        List<MonitoringDetailItem> items = new List<MonitoringDetailItem>();
+        try {
+            for (CronTrigger row : [
+                SELECT Id, State, NextFireTime, CronJobDetail.Name
+                FROM CronTrigger
+                ORDER BY NextFireTime ASC
+                LIMIT 20
+            ]) {
+                MonitoringDetailItem item = new MonitoringDetailItem();
+                item.label = String.isBlank(row.CronJobDetail.Name) ? 'Scheduled Job' : row.CronJobDetail.Name;
+                item.value = row.State + ' | Next: ' + formatMonitoringDatetime(row.NextFireTime);
+                items.add(item);
+            }
+        } catch (Exception ex) {
+            Clarity360SecureLog.warn('Dashboard.getScheduledJobsDetail', ex);
+        }
+
+        if (items.isEmpty()) {
+            items.addAll(buildMonitoringItems(new List<List<String>>{
+                new List<String>{ 'Scheduled Jobs', 'No scheduled Apex jobs were found.' }
+            }));
+        }
+        detail.items = items;
+        return detail;
+    }
+
+    private static HygieneSection buildInactiveUsersSection(Integer rowLimit) {
+        HygieneSection section = initHygieneSection(
+            'inactiveUsers',
+            'Inactive Users',
+            'Users who are currently inactive and may no longer need related access artifacts.',
+            'No inactive users were found.'
+        );
+        try {
+            section.totalCount = [SELECT COUNT() FROM User WHERE IsActive = false];
+            for (User row : [
+                SELECT Id, Name, Username, Profile.Name, LastLoginDate
+                FROM User
+                WHERE IsActive = false
+                ORDER BY LastLoginDate DESC NULLS LAST, Name ASC
+                LIMIT :rowLimit
+            ]) {
+                section.rows.add(buildHygieneRow(
+                    'user-' + row.Id,
+                    row.Name,
+                    row.Username,
+                    'Profile ' + row.Profile.Name + ' | Last login ' + formatMonitoringDatetime(row.LastLoginDate)
+                ));
+            }
+        } catch (Exception ex) {
+            Clarity360SecureLog.warn('Dashboard.getAdminHygieneSnapshot.inactiveUsers', ex);
+        }
+        return section;
+    }
+
+    private static HygieneSection buildUnassignedPermissionSetsSection(Integer rowLimit) {
+        HygieneSection section = initHygieneSection(
+            'unassignedPermissionSets',
+            'Custom Permission Sets With No Assignments',
+            'Only custom permission sets that are not assigned to any user and do not match a namespaced permission set group.',
+            'No unassigned custom permission sets were found.'
+        );
+        try {
+            Set<Id> assignedIds = new Set<Id>();
+            for (AggregateResult row : [
+                SELECT PermissionSetId permissionSetIdValue, COUNT(Id) totalCount
+                FROM PermissionSetAssignment
+                GROUP BY PermissionSetId
+            ]) {
+                assignedIds.add((Id) row.get('permissionSetIdValue'));
+            }
+            Set<String> namespacedGroupKeys = new Set<String>();
+            for (PermissionSetGroup groupRow : [
+                SELECT DeveloperName, MasterLabel
+                FROM PermissionSetGroup
+                WHERE NamespacePrefix != null
+            ]) {
+                namespacedGroupKeys.add(normalizeHygieneKey(groupRow.DeveloperName));
+                namespacedGroupKeys.add(normalizeHygieneKey(groupRow.MasterLabel));
+            }
+            List<PermissionSet> permissionSets = [
+                SELECT Id, Label, Name, NamespacePrefix, IsCustom
+                FROM PermissionSet
+                WHERE IsOwnedByProfile = false
+                AND IsCustom = true
+                AND NamespacePrefix = null
+                ORDER BY Label ASC, Name ASC
+            ];
+            for (PermissionSet row : permissionSets) {
+                if (assignedIds.contains(row.Id)) {
+                    continue;
+                }
+                if (
+                    namespacedGroupKeys.contains(normalizeHygieneKey(row.Name)) ||
+                    namespacedGroupKeys.contains(normalizeHygieneKey(row.Label))
+                ) {
+                    continue;
+                }
+                section.totalCount++;
+                if (section.rows.size() < rowLimit) {
+                    section.rows.add(buildHygieneRow(
+                        'permset-' + row.Id,
+                        String.isBlank(row.Label) ? row.Name : row.Label,
+                        row.Name,
+                        'Custom org permission set with no assignments.'
+                    ));
+                }
+            }
+        } catch (Exception ex) {
+            Clarity360SecureLog.warn('Dashboard.getAdminHygieneSnapshot.unassignedPermissionSets', ex);
+        }
+        return section;
+    }
+
+    private static HygieneSection buildUnassignedPermissionSetGroupsSection(Integer rowLimit) {
+        HygieneSection section = initHygieneSection(
+            'unassignedPermissionSetGroups',
+            'Custom Permission Set Groups With No Assignments',
+            'Only unmanaged permission set groups that are not assigned to any user.',
+            'No unassigned custom permission set groups were found.'
+        );
+        try {
+            Set<Id> assignedIds = new Set<Id>();
+            for (AggregateResult row : [
+                SELECT PermissionSetGroupId permissionSetGroupIdValue, COUNT(Id) totalCount
+                FROM PermissionSetAssignment
+                WHERE PermissionSetGroupId != null
+                GROUP BY PermissionSetGroupId
+            ]) {
+                assignedIds.add((Id) row.get('permissionSetGroupIdValue'));
+            }
+            List<PermissionSetGroup> groups = [
+                SELECT Id, DeveloperName, MasterLabel, Status, NamespacePrefix
+                FROM PermissionSetGroup
+                WHERE NamespacePrefix = null
+                ORDER BY MasterLabel ASC, DeveloperName ASC
+            ];
+            for (PermissionSetGroup row : groups) {
+                if (assignedIds.contains(row.Id)) {
+                    continue;
+                }
+                section.totalCount++;
+                if (section.rows.size() < rowLimit) {
+                    section.rows.add(buildHygieneRow(
+                        'permsetgroup-' + row.Id,
+                        String.isBlank(row.MasterLabel) ? row.DeveloperName : row.MasterLabel,
+                        row.DeveloperName,
+                        'Custom org permission set group | Status ' + row.Status
+                    ));
+                }
+            }
+        } catch (Exception ex) {
+            Clarity360SecureLog.warn('Dashboard.getAdminHygieneSnapshot.unassignedPermissionSetGroups', ex);
+        }
+        return section;
+    }
+
+    private static HygieneSection initHygieneSection(String key, String label, String description, String emptyMessage) {
+        HygieneSection section = new HygieneSection();
+        section.key = key;
+        section.label = label;
+        section.description = description;
+        section.emptyMessage = emptyMessage;
+        section.totalCount = 0;
+        section.rows = new List<HygieneRow>();
+        return section;
+    }
+
+    private static HygieneRow buildHygieneRow(String key, String name, String detail, String context) {
+        HygieneRow row = new HygieneRow();
+        row.key = key;
+        row.name = String.isBlank(name) ? '-' : name;
+        row.detail = String.isBlank(detail) ? '-' : detail;
+        row.context = String.isBlank(context) ? '-' : context;
+        return row;
+    }
+
+    private static String normalizeHygieneKey(String value) {
+        return String.isBlank(value) ? '' : value.trim().toLowerCase();
+    }
+
+    private static List<MonitoringDetailItem> buildMonitoringItems(List<List<String>> sourceRows) {
+        List<MonitoringDetailItem> items = new List<MonitoringDetailItem>();
+        for (List<String> row : sourceRows) {
+            if (row == null || row.isEmpty()) {
+                continue;
+            }
+            MonitoringDetailItem item = new MonitoringDetailItem();
+            item.label = row[0];
+            item.value = row.size() > 1 && !String.isBlank(row[1]) ? row[1] : '-';
+            items.add(item);
+        }
+        return items;
+    }
+
+    private static String formatMonitoringDatetime(Datetime value) {
+        return value == null ? '-' : value.format('yyyy-MM-dd HH:mm');
+    }
+
+    private static String humanizeSummary(String summary) {
+        if (String.isBlank(summary)) {
+            return '-';
+        }
+        List<String> parts = new List<String>();
+        for (String token : summary.split(';')) {
+            String trimmed = token == null ? null : token.trim();
+            if (String.isBlank(trimmed)) {
+                continue;
+            }
+            Integer splitIndex = trimmed.indexOf('=');
+            if (splitIndex <= 0 || splitIndex >= trimmed.length() - 1) {
+                parts.add(trimmed);
+                continue;
+            }
+            parts.add(trimmed.substring(0, splitIndex) + ': ' + trimmed.substring(splitIndex + 1));
+        }
+        return String.join(parts, ', ');
     }
 
     @AuraEnabled
@@ -586,14 +1213,18 @@ public with sharing class Clarity360DashboardController {
 
     @AuraEnabled
     public static Id runFullScan() {
-        return runFullScanV2(null).jobId;
+        return runFullScanV2(null, true, null).jobId;
+    }
+
+    public static OperationResult runFullScanV2(String requestId, Boolean sendReport) {
+        return runFullScanV2(requestId, sendReport, null);
     }
 
     @AuraEnabled
-    public static OperationResult runFullScanV2(String requestId) {
+    public static OperationResult runFullScanV2(String requestId, Boolean sendReport, String reportRecipient) {
         try {
             assertSetupComplete();
-            ScanOrchestrator.StartResult result = ScanOrchestrator.runFullScanV2(requestId);
+            ScanOrchestrator.StartResult result = ScanOrchestrator.runFullScanV2(requestId, sendReport, reportRecipient);
             return toOperationResult(result, 'FULL_SCAN_QUEUED');
         } catch (Exception ex) {
             Clarity360SecureLog.error('Dashboard.runFullScanV2', ex);
@@ -1397,7 +2028,7 @@ public with sharing class Clarity360DashboardController {
                 if (coveragePct.equalsIgnoreCase('Unavailable') || coveragePct.equalsIgnoreCase('Unknown')) {
                     details.add('Coverage pending');
                 } else {
-                    details.add('Coverage=' + coveragePct + '%');
+                    details.add('Coverage=' + formatCoverageLabel(coveragePct));
                 }
             }
             return componentType + (details.isEmpty() ? '' : ' (' + String.join(details, ', ') + ')');
@@ -1582,7 +2213,7 @@ public with sharing class Clarity360DashboardController {
                         processType == 'Workflow' ? 'Process Builder' : 'Flow',
                         ToolingApiService.getString(row, 'Id')
                     ),
-                    ToolingApiService.getString(row, 'Status'),
+                    normalizeBinaryComponentStatus(ToolingApiService.getString(row, 'Status')),
                     null,
                     'ProcessType=' + processType
                 );
@@ -1624,7 +2255,7 @@ public with sharing class Clarity360DashboardController {
                     'GLOBAL.WORKFLOW.' + sanitizeKey(String.valueOf(row.get('Id'))),
                     'Workflow Rule',
                     String.valueOf(row.get('Name')),
-                    'Configured',
+                    'Inactive',
                     String.valueOf(row.get('TableEnumOrId')),
                     'Workflow rule metadata'
                 );
@@ -1635,9 +2266,10 @@ public with sharing class Clarity360DashboardController {
         return rows;
     }
 
+    @TestVisible
     private static String deriveWorkflowRuleStatus(Map<String, Object> row) {
         if (row == null) {
-            return 'Configured';
+            return 'Inactive';
         }
         Object metadataValue = row.get('Metadata');
         if (metadataValue instanceof Map<String, Object>) {
@@ -1650,19 +2282,19 @@ public with sharing class Clarity360DashboardController {
                 return activeFlag == true ? 'Active' : 'Inactive';
             }
         }
-        return 'Configured';
+        return 'Inactive';
     }
 
     private static List<GlobalComponentRow> loadGlobalApexClasses(Integer maxRows) {
         List<GlobalComponentRow> rows = new List<GlobalComponentRow>();
-        List<ApexClass> classes = [SELECT Id, Name, Body FROM ApexClass LIMIT :maxRows];
+        List<ApexClass> classes = [SELECT Id, Name, Body, NamespacePrefix FROM ApexClass LIMIT :maxRows];
         Map<Id, Decimal> coverageByClassId = loadApexCoveragePct(new Map<Id, ApexClass>(classes).keySet());
         for (ApexClass classRow : classes) {
-            if (!isActionableApexClassForInventory(classRow)) {
+            if (!isCoverageScopedApexClassForInventory(classRow)) {
                 continue;
             }
             Decimal coveragePct = coverageByClassId.get(classRow.Id);
-            String status = coveragePct == null ? 'Coverage Pending' : String.valueOf(coveragePct.setScale(2)) + '%';
+            String status = coveragePct == null ? 'Coverage Pending' : formatCoverageLabel(String.valueOf(coveragePct));
             String detail = coveragePct == null
                 ? 'Run Usage Scan or Full Scan again to refresh Apex coverage.'
                 : 'Apex coverage available';
@@ -1688,25 +2320,70 @@ public with sharing class Clarity360DashboardController {
         row.fieldKey = fieldKey;
         row.componentType = componentType;
         row.componentName = componentName;
-        row.status = String.isBlank(status) ? 'Unknown' : status;
+        row.status = normalizeGlobalComponentStatus(componentType, status);
         row.objectName = objectName;
         row.detail = detail;
         rows.add(row);
     }
 
+    @TestVisible
+    private static String normalizeGlobalComponentStatus(String componentType, String status) {
+        if (componentType == 'Apex Class') {
+            return String.isBlank(status) ? 'Coverage Pending' : status;
+        }
+
+        String normalizedStatus = String.isBlank(status) ? 'Inactive' : status;
+        if (!normalizedStatus.contains('|')) {
+            return normalizeBinaryComponentStatus(normalizedStatus);
+        }
+
+        List<String> parts = normalizedStatus.split('\\|');
+        String baseStatus = parts.isEmpty() ? normalizedStatus : parts[0].trim();
+        String suffix = parts.size() > 1 ? parts[1].trim() : null;
+        String collapsedBase = normalizeBinaryComponentStatus(baseStatus);
+        return String.isBlank(suffix) ? collapsedBase : collapsedBase + ' | ' + suffix;
+    }
+
     private static String formatTriggerStatus(String triggerStatus, Decimal coveragePct) {
-        String baseStatus = String.isBlank(triggerStatus) ? 'Unknown' : triggerStatus;
+        String baseStatus = normalizeBinaryComponentStatus(triggerStatus);
         if (coveragePct == null) {
             return baseStatus + ' | Coverage Pending';
         }
-        return baseStatus + ' | ' + String.valueOf(coveragePct.setScale(2)) + '%';
+        return baseStatus + ' | ' + formatCoverageLabel(String.valueOf(coveragePct));
+    }
+
+    @TestVisible
+    private static String normalizeBinaryComponentStatus(String status) {
+        return String.valueOf(status) == 'Active' ? 'Active' : 'Inactive';
     }
 
     private static String formatTriggerDetail(Decimal coveragePct) {
         if (coveragePct == null) {
             return 'Trigger metadata | Coverage pending';
         }
-        return 'Trigger metadata | Coverage=' + String.valueOf(coveragePct.setScale(2)) + '%';
+        return 'Trigger metadata | Coverage=' + formatCoverageLabel(String.valueOf(coveragePct));
+    }
+
+    @TestVisible
+    private static String formatCoverageLabel(String rawValue) {
+        if (String.isBlank(rawValue)) {
+            return '0%';
+        }
+        try {
+            Decimal parsed = Decimal.valueOf(rawValue);
+            return String.valueOf(parsed.setScale(0)) + '%';
+        } catch (Exception ex) {
+            String normalized = rawValue.trim();
+            if (normalized.endsWith('%')) {
+                normalized = normalized.substring(0, normalized.length() - 1);
+            }
+            try {
+                Decimal parsed = Decimal.valueOf(normalized);
+                return String.valueOf(parsed.setScale(0)) + '%';
+            } catch (Exception innerEx) {
+                return rawValue;
+            }
+        }
     }
 
     private static Boolean isBetterFlowToolingRow(Map<String, Object> candidate, Map<String, Object> current) {
@@ -1866,14 +2543,27 @@ public with sharing class Clarity360DashboardController {
         return String.join(quoted, ',');
     }
 
-    private static Boolean isActionableApexClassForInventory(ApexClass classRow) {
+    @TestVisible
+    private static Boolean isActionableApexClassForInventory(ApexClass classRow, Set<String> triggerReferencedClassNames) {
+        return isCoverageScopedApexClassForInventory(classRow);
+    }
+
+    @TestVisible
+    private static Boolean isCoverageScopedApexClassForInventory(ApexClass classRow) {
         if (classRow == null || String.isBlank(classRow.Name)) {
+            return false;
+        }
+        if (!String.isBlank(classRow.NamespacePrefix)) {
             return false;
         }
         if (classRow.Name.endsWith('Test')) {
             return false;
         }
-        if (classRow.Body != null && classRow.Body.toLowerCase().contains('@istest')) {
+        if (classRow.Body == null) {
+            return false;
+        }
+        String loweredBody = classRow.Body.toLowerCase();
+        if (loweredBody.contains('@istest')) {
             return false;
         }
         return true;

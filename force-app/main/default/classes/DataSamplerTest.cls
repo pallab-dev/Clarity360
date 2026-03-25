@@ -74,4 +74,92 @@ private class DataSamplerTest {
             System.assertEquals(1, signal.SampleSize__c, 'Duplicate Id selection should not break sampling.');
         }
     }
+
+    @IsTest
+    static void scanObjectMarksFieldsOnLayoutWhenLayoutScanEnabled() {
+        insert new Clarity360SetupConfig__c(
+            IsSetupComplete__c = true,
+            EnableLayoutScan__c = true
+        );
+        Clarity360Settings.resetCache();
+
+        insert new Account(Name = 'Acme E');
+
+        FieldInventory__c customInventory = new FieldInventory__c(
+            FieldKey__c = 'Account.Legacy_Flag__c',
+            ObjectApiName__c = 'Account',
+            FieldApiName__c = 'Legacy_Flag__c'
+        );
+        insert customInventory;
+
+        LayoutScanService.setTestMetadataByLayoutName(new Map<String, Object>{
+            'Account Layout' => new Map<String, Object>{
+                'layoutSections' => new List<Object>{
+                    new Map<String, Object>{
+                        'layoutColumns' => new List<Object>{
+                            new Map<String, Object>{
+                                'layoutItems' => new List<Object>{
+                                    new Map<String, Object>{ 'field' => 'Legacy_Flag__c' }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        Test.startTest();
+        List<UsageSignal__c> signals = DataSampler.scanObject('Account', new List<FieldInventory__c>{ customInventory }, 10);
+        Test.stopTest();
+
+        System.assertEquals(1, signals.size());
+        System.assertEquals(true, signals[0].IsOnLayout__c);
+        System.assert(signals[0].EvidenceSummary__c.contains('IsOnLayout=true'));
+
+        LayoutScanService.clearTestOverrides();
+    }
+
+    @IsTest
+    static void scanObjectLeavesLayoutFalseWhenLayoutScanDisabled() {
+        insert new Clarity360SetupConfig__c(
+            IsSetupComplete__c = true,
+            EnableLayoutScan__c = false
+        );
+        Clarity360Settings.resetCache();
+
+        insert new Account(Name = 'Acme F');
+
+        FieldInventory__c customInventory = new FieldInventory__c(
+            FieldKey__c = 'Account.Legacy_Flag__c',
+            ObjectApiName__c = 'Account',
+            FieldApiName__c = 'Legacy_Flag__c'
+        );
+        insert customInventory;
+
+        LayoutScanService.setTestMetadataByLayoutName(new Map<String, Object>{
+            'Account Layout' => new Map<String, Object>{
+                'layoutSections' => new List<Object>{
+                    new Map<String, Object>{
+                        'layoutColumns' => new List<Object>{
+                            new Map<String, Object>{
+                                'layoutItems' => new List<Object>{
+                                    new Map<String, Object>{ 'field' => 'Legacy_Flag__c' }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        Test.startTest();
+        List<UsageSignal__c> signals = DataSampler.scanObject('Account', new List<FieldInventory__c>{ customInventory }, 10);
+        Test.stopTest();
+
+        System.assertEquals(1, signals.size());
+        System.assertEquals(false, signals[0].IsOnLayout__c);
+        System.assert(signals[0].EvidenceSummary__c.contains('IsOnLayout=false'));
+
+        LayoutScanService.clearTestOverrides();
+    }
 }

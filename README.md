@@ -2,89 +2,109 @@
 
 ## Overview
 
-Clarity360 is a Salesforce 2GP managed package repository. The repository uses protected promotion branches, two GitHub Actions pipelines, and no direct pushes to release or production branches.
+Clarity360 is a Salesforce 2GP managed package repository. The repository now uses a single protected `production` branch. All validation happens on pull requests before merge, with checks staged from fast changed-file validation through org validation, package smoke, and manual UAT.
 
-For teams staying on GitHub Free for a private repository, this repo also includes a local Git hook installer and merge-verification steps inside the deployment workflows to reduce accidental direct pushes without paid branch protection.
+## Branch Strategy
 
-Current repository access check: only `pallab-dev` is listed as a collaborator with admin rights, so only that account can merge today. If additional collaborators are added later, the merged-PR deployment workflows still block deployment and release unless the merge was performed by `pallab-dev`.
-
-## Branch strategy
-
-The repository uses exactly 3 branch types:
+The repository uses 2 branch types:
 
 ### `feature/*`
 
-- Created by developers for each piece of work such as `feature/fix-login` or `feature/payment-module`.
-- Always branched from the current `release/N` branch.
-- Merged back into `release/N` through a pull request only.
-- No pipeline runs on `feature/*` branches.
+- Created by developers for each piece of work.
+- Branched from the latest `production`.
+- Merged back into `production` through a pull request only.
 - Deleted after merge.
-
-### `release/1`, `release/2`, `release/3` ...
-
-- One release branch is used per sprint or iteration.
-- A new `release/N` branch is cut from the previous `release/N-1` branch at the start of each sprint.
-- Pull requests targeting `release/N` trigger the `Release Validation` workflow automatically.
-- Merged pull requests into `release/N` trigger the `Release Deploy` workflow, which deploys to the Testing Org only after successful PR validation.
-- `release/N` is never merged directly. When the sprint is ready to ship, a pull request is raised from `release/N` to `production`.
 
 ### `production`
 
-- `production` is the permanent protected branch.
-- It only receives pull requests from `release/N` branches.
-- Pull requests targeting `production` trigger the `Production Validation` workflow automatically.
-- Merged pull requests into `production` trigger the `Production Release` workflow for package promotion and release tagging.
-- No developer pushes directly to this branch.
+- Permanent protected branch.
+- Receives pull requests from `feature/*`.
+- Pull requests targeting `production` trigger the `Production PR Validation` workflow.
+- Merged pull requests into `production` trigger the production release workflow for package promotion and release tagging.
+- No direct developer pushes to this branch.
 
-## Developer workflow
+## Pull Request Flow
 
-1. Pull the latest changes from the active `release/N` branch.
-2. Create a new `feature/your-branch` branch from that `release/N` branch.
-3. Write code, commit changes, and push the feature branch.
-4. Open a pull request targeting `release/N`.
-5. Get 1 approval and a green `release-pipeline`, then merge the pull request.
-6. The merge commit to `release/N` automatically deploys the validated source to the Testing Org.
-7. When the sprint is complete, the release manager opens a pull request from `release/N` to `production`.
-8. Get 2 approvals and a green `production-pipeline`, then merge the pull request.
-9. The merge commit to `production` automatically promotes the package version and creates the release tag.
+1. Branch from `production`.
+2. Push your feature branch and open a pull request to `production`.
+3. The PR workflow runs these stages in order:
+   - `Detect Changes`
+   - `Delta Quality Gates`
+   - `Changed Apex Coverage`
+   - `Platform Safety Gates`
+   - `Testing Org Integration`
+   - `Scratch Org Package Smoke`
+   - `Manual UAT`
+   - `pr-pipeline`
+4. Merge only after `pr-pipeline` is green and the PR has the required approval.
 
-## Local Push Guard
+## Validation Model
 
-Install the repo-managed Git hooks once per clone:
+### Unit Tests -> PR
 
-```bash
-npm run install:hooks
-```
+- Changed-file validation runs first.
+- Changed Apex classes and triggers are validated by coverage, not by filename conventions.
+- If a PR does not change non-test Apex or triggers, changed-member coverage is skipped.
+- LWC Jest tests run on the PR workflow.
 
-This configures `.githooks/pre-push` as the local pre-push hook and blocks direct pushes to `release/*` and `production`.
+### Integration Tests -> Testing Org
 
-This is best-effort only. Local Git hooks can be bypassed by a developer, so they do not replace GitHub branch protection.
+- PR content is deployed to the shared Testing Org before merge.
+- Integration validation runs there after static and changed-member checks pass.
+- The Testing Org layer runs the dedicated Apex integration suite listed in [.github/apex/integration-tests.txt](/Users/pallabsaikia/Downloads/Clarity360/.github/apex/integration-tests.txt).
+
+### Package Smoke -> Scratch Org
+
+- A scratch org is created for the PR after platform safety gates pass.
+- A package version is created from the PR source and installed into a fresh scratch org for install validation.
+- A second package version is created from the base branch source and installed first in another scratch org, then upgraded to the PR package version.
+- `Clarity360SmokeTest` is reserved for package install and upgrade smoke validation.
+- No PBO org is required for this validation path.
+
+### Manual UAT -> Testing Org
+
+- Manual UAT is the final pre-merge gate.
+- Configure the `testing-org-uat` GitHub environment with required reviewers to enforce approval.
+
+## Platform Safety Gates
+
+The PR workflow includes both changed-file and full-source platform safety checks before org deployment:
+
+- PMD for Apex and triggers
+- ESLint for LWC JavaScript
+- LWC Jest
+- XML validation for changed metadata
+- Salesforce Scanner security rules
+- AppExchange PMD review scan
+- Coverage enforcement for changed Apex members only
+
+These checks are intended to catch CRUD/FLS, sharing, governor limit, bulkification, and related secure coding issues before Testing Org or scratch org time is consumed.
+
+## Local Quality Gates
+
+Use the same checks locally before handing the package to another engineer:
+
+- `npm run lint`
+- `npm run test:unit:lwc`
+- `npm run lint:apex`
+- `npm run lint:apex:appexchange`
+
+The Apex PMD ruleset lives at [config/pmd-ruleset.xml](/Users/pallabsaikia/Downloads/Clarity360/config/pmd-ruleset.xml).
 
 ## Branch Protection Rules
 
-Configure these rules manually in GitHub Settings -> Branches after the repository is created.
+Configure these rules manually in GitHub Settings -> Branches.
 
-### Branch pattern: `release/*`
+### Branch pattern: `production`
 
 - Require a pull request before merging
 - Require at least 1 approving review
 - Dismiss stale reviews when new commits are pushed
 - Require status checks to pass before merging
-- Required status check: `release-pipeline`
-- Require branches to be up to date before merging
-- Do not allow bypassing the above settings, including for admins
-
-### Branch pattern: `production`
-
-- Require a pull request before merging
-- Require at least 2 approving reviews
-- Dismiss stale reviews when new commits are pushed
-- Require status checks to pass before merging
-- Required status check: `production-pipeline`
+- Required status check: `pr-pipeline`
 - Require branches to be up to date before merging
 - Do not allow bypassing the above settings, including for admins
 - Require linear history
-- Restrict who can push so only the `release-manager` GitHub team role can push
 
 ## Required GitHub Secrets
 
@@ -92,66 +112,10 @@ Add these secrets in GitHub Settings -> Secrets -> Actions.
 
 | Secret | Description |
 | --- | --- |
-| `DEVHUB_SFDX_URL` | SFDX auth URL for the Dev Hub org used by `sf org login sfdx-url` |
-| `TESTORG_SFDX_URL` | SFDX auth URL for the Testing Org used by `sf org login sfdx-url` |
-| `PBOORG_SFDX_URL` | Optional for now. Add this when the PBO Org is available to enable production installation and smoke tests. |
-| `PACKAGE_NAME` | Exact package name as registered in the Dev Hub. Required for production packaging and AppExchange release operations. |
-| `PACKAGE_ID` | `0Ho` package ID from the Dev Hub. Required for production packaging and release promotion operations. |
+| `DEVHUB_SFDX_URL` | SFDX auth URL for the Dev Hub org used to create PR scratch orgs |
+| `TESTORG_SFDX_URL` | SFDX auth URL for the shared Testing Org used for integration validation and UAT |
+| `PACKAGE_ID` | `0Ho` package ID from the Dev Hub used for PR package validation and release operations |
 
-## Quality gates
+## Release Flow
 
-Both pipelines now expose the quality checks as separate GitHub Actions jobs. Pull requests run the validation path against the shared Testing Org. Separate merged-PR workflows run the release deployment and production release paths only after a successful validation run has been found for that pull request.
-
-1. PMD static analysis using `sf scanner run` against all Apex classes and triggers in the package. Any severity 1 or 2 violation fails the `PMD Scan` job.
-2. ESLint for LWC and Aura using `npm run lint` against `./force-app/**/*.js`. Any ESLint error fails the `ESLint` job. Warnings are allowed.
-3. Salesforce Scanner security rules using `sf scanner run` against `./force-app` with category `Security` and severity threshold `1`. Any security violation fails the `Security Scan` job.
-4. XML validation using `xmllint` across `force-app` and `manifest`. Any malformed XML fails the `XML Validation` job.
-5. Metadata validation using `sf project deploy start --dry-run` in the shared Testing Org. This catches deploy-time metadata and configuration issues before the merge is allowed.
-6. Changed Apex coverage validation using `sf project deploy start --dry-run --test-level RunSpecifiedTests` against the shared Testing Org. When a pull request changes non-test Apex classes or triggers, the workflow validates those changed members with specified tests so each changed class or trigger must meet the 75% requirement individually.
-7. Full-package regression validation in the shared Testing Org. The workflow runs a metadata dry-run with `NoTestRun`, then runs `RunLocalTests` separately and compares org-wide coverage before and after. Changed Apex must still meet 75% individually, and shared-org overall coverage is enforced as a non-regression gate until the org baseline reaches 75% or higher.
-8. AppExchange PMD review scanning using `sf scanner run --engine pmd-appexchange` with severity threshold `2`.
-
-The final pull request checks remain `release-pipeline` and `production-pipeline`. Those jobs only pass when all upstream validation jobs succeed.
-
-Merged-PR deployment and promotion workflows also re-check that the associated pull request validation workflow concluded successfully before any deployment or promotion step starts.
-
-## AppExchange Security Review policy
-
-Salesforce AppExchange security review is a one-time review unless the package introduces new permissions, new external access, new integrations, or materially broader exposure. Use the checklist in [.github/pull_request_template.md](/Users/pallabsaikia/Downloads/Clarity360/.github/pull_request_template.md) to flag changes that require a release manager review and potential re-submission.
-
-Current temporary exception: the production workflow promotes the package version but skips PBO installation and post-install smoke tests until a PBO org is available and `PBOORG_SFDX_URL` is configured.
-
-Current temporary exception: scratch-org validation is disabled to avoid daily Dev Hub signup exhaustion. Pull requests validate against the shared Testing Org with both changed-Apex coverage checks and full-package dry-run validation. Merged pull requests deploy source directly to the Testing Org, then run a dedicated smoke suite. Package creation remains a production concern.
-
-## Pipeline flow diagram
-
-```text
-feature/* ──PR──► release/N ──auto──► [Release Validation]
-                                          │
-                                          ├─ PMD
-                                          ├─ ESLint
-                                          ├─ Security
-                                          ├─ XML
-                                          ├─ Metadata
-                                          ├─ AppExchange
-                                          └─ Testing Org Validation
-                                          │
-                               merge PR ──┴──► [Release Deploy]
-                                                     │
-                                            [Deploy Testing Org]
-                                                     │
-                                            [Post-Deploy Smoke Test]
-                                                     │
-                                     PR (sprint done)◄──────────────┘
-                                              │
-                                              ▼
-                                         production ──PR──► [Production Validation]
-                                                              │
-                                                              └─ same validation gates
-                                                                      │
-                                                           merge PR ──┴──► [Production Release]
-                                                                                 │
-                                                                         [Promote Released]
-                                                                                 │
-                                                                          [Create Release Tag]
-```
+After a PR is merged to `production`, the release workflow in [.github/workflows/production-release.yml](/Users/pallabsaikia/Downloads/Clarity360/.github/workflows/production-release.yml) verifies that the PR validation workflow succeeded, then promotes the package version when `.version-id` is present and creates a release tag.

@@ -17,6 +17,9 @@ public with sharing class ToolingApiService {
 
     @TestVisible private static ToolingQueryResult testQueryResult;
     @TestVisible private static ToolingMutationResult testDeleteResult;
+    @TestVisible private static List<ToolingQueryResult> testQueryResults;
+    @TestVisible private static List<ToolingMutationResult> testDeleteResults;
+    @TestVisible private static Boolean allowLiveCalloutsInTests = false;
 
     public static ToolingQueryResult query(String soql, Integer maxRows) {
         return queryInternal(soql, maxRows, null, true);
@@ -65,7 +68,11 @@ public with sharing class ToolingApiService {
         }
 
         Integer rowLimit = (maxRows == null || maxRows <= 0) ? 1000 : maxRows;
-        if (Test.isRunningTest()) {
+        if (Test.isRunningTest() && allowLiveCalloutsInTests != true) {
+            if (testQueryResults != null && !testQueryResults.isEmpty()) {
+                ToolingQueryResult queued = testQueryResults.remove(0);
+                return queued == null ? result : queued;
+            }
             if (testQueryResult != null) {
                 return testQueryResult;
             }
@@ -120,7 +127,11 @@ public with sharing class ToolingApiService {
             return result;
         }
 
-        if (Test.isRunningTest()) {
+        if (Test.isRunningTest() && allowLiveCalloutsInTests != true) {
+            if (testDeleteResults != null && !testDeleteResults.isEmpty()) {
+                ToolingMutationResult queued = testDeleteResults.remove(0);
+                return queued == null ? result : queued;
+            }
             if (testDeleteResult != null) {
                 return testDeleteResult;
             }
@@ -388,9 +399,22 @@ public with sharing class ToolingApiService {
     }
 
     @TestVisible
+    static void setTestQueryResults(List<ToolingQueryResult> values) {
+        testQueryResults = values == null ? null : new List<ToolingQueryResult>(values);
+    }
+
+    @TestVisible
+    static void setTestDeleteResults(List<ToolingMutationResult> values) {
+        testDeleteResults = values == null ? null : new List<ToolingMutationResult>(values);
+    }
+
+    @TestVisible
     static void clearTestOverrides() {
         testQueryResult = null;
         testDeleteResult = null;
+        testQueryResults = null;
+        testDeleteResults = null;
+        allowLiveCalloutsInTests = false;
     }
 
     private static Boolean shouldUseNamedCredential() {

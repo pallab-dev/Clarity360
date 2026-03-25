@@ -1,9 +1,46 @@
 <template>
-    <lightning-card title="Clarity360 Field Usage Optimizer" icon-name="custom:custom63">
+    <lightning-card>
         <template if:false={dashboardLocked}>
-            <div class="toolbar slds-p-horizontal_medium slds-p-bottom_small">
-                <lightning-button variant="brand" label="Run Full Scan" onclick={handleRunFullScan} disabled={fullScanDisabled}></lightning-button>
-                <lightning-button label="Refresh" onclick={refreshAll} disabled={isBusy}></lightning-button>
+            <div class="dashboard-shell-header slds-p-horizontal_medium slds-p-top_medium slds-p-bottom_small">
+                <div class="dashboard-shell-copy">
+                    <div class="dashboard-shell-meta">
+                        <span class="dashboard-shell-kicker">{usageHeaderDateLabel}</span>
+                        <span class="dashboard-shell-meta-divider"></span>
+                        <span class="dashboard-shell-context">{dashboardContextLabel}</span>
+                    </div>
+                    <h1 class="dashboard-shell-title">{greetingLabel}, {greetingName}</h1>
+                    <p class="dashboard-shell-subtitle">{dashboardShellSubtitle}</p>
+                </div>
+                <div class="dashboard-shell-aside">
+                    <div class="dashboard-shell-status-grid">
+                        <div class="monitoring-mini-card">
+                            <div class="summary-label">Setup Ready</div>
+                            <div class="summary-value small">{setupProgressPct}%</div>
+                        </div>
+                        <div class="monitoring-mini-card">
+                            <div class="summary-label">Open Recommendations</div>
+                            <div class="summary-value small">{summary.openRecommendationCount}</div>
+                        </div>
+                    </div>
+                    <div class="toolbar" data-tour-id="dashboard-actions">
+                        <lightning-button variant="brand" label="Run Full Scan" onclick={handleRunFullScan} disabled={fullScanDisabled}></lightning-button>
+                        <div class="toolbar-actions">
+                            <lightning-button label="Take Guided Tour" onclick={handleOpenTour}></lightning-button>
+                            <lightning-button label="Refresh" onclick={refreshAll} disabled={isBusy}></lightning-button>
+                            <div class="mode-toggle-shell">
+                                <span class="mode-toggle-label">AI Mode</span>
+                                <lightning-input
+                                    type="toggle"
+                                    variant="label-hidden"
+                                    label="AI Mode"
+                                    checked={isAiModeActive}
+                                    onchange={handleModeToggleChange}
+                                    disabled={modeSelectorDisabled}
+                                ></lightning-input>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
             <template if:true={fullScanDisabledReason}>
                 <div class="slds-p-horizontal_medium slds-p-bottom_small">
@@ -14,7 +51,13 @@
 
         <template if:true={isBusy}>
             <div class="slds-p-horizontal_medium slds-p-bottom_small">
-                <lightning-spinner size="small" alternative-text="Loading dashboard"></lightning-spinner>
+                <div class="operation-banner">
+                    <lightning-spinner size="small" alternative-text="Loading dashboard"></lightning-spinner>
+                    <div>
+                        <div class="operation-banner-title">{pendingOperationLabel}</div>
+                        <div class="operation-banner-copy">{pendingOperationDetail}</div>
+                    </div>
+                </div>
             </div>
         </template>
         <template if:true={hasDataWarning}>
@@ -92,62 +135,53 @@
 
         <template if:false={dashboardLocked}>
             <div class="slds-p-horizontal_medium slds-p-bottom_medium">
-                <lightning-tabset active-tab-value={activeDashboardTab} onactive={handleTabChange}>
-                    <lightning-tab label="Usage" value="usage">
-                        <div class="slds-p-top_small">
-                            <div class={modeBannerClass}>
-                                <div>
-                                    <div class="mode-title">{effectiveModeLabel}</div>
-                                    <div class="mode-subtitle">{modeDescription}</div>
-                                    <template if:true={assistantStatusMessage}>
-                                        <div class="mode-note">{assistantStatusMessage}</div>
-                                    </template>
+                <lightning-tabset active-tab-value={activeDashboardTab}>
+                    <lightning-tab label="Usage" value="usage" data-tab="usage" onactive={handleTabChange}>
+                        <template if:true={showUsageProgressBanner}>
+                            <div class="usage-progress-banner slds-p-top_medium">
+                                <div class="usage-progress-banner-head">
+                                    <lightning-spinner size="x-small" alternative-text="Refreshing usage data"></lightning-spinner>
+                                    <span>Usage workspace update in progress</span>
                                 </div>
-                                <lightning-radio-group
-                                    type="button"
-                                    name="modeSelector"
-                                    options={modeOptions}
-                                    value={currentMode}
-                                    onchange={handleModeChange}
-                                    disabled={modeSelectorDisabled}
-                                ></lightning-radio-group>
-                            </div>
-                        </div>
-                        <template if:true={showAssistantWarning}>
-                            <div class="slds-p-top_small">
-                                <div class="status-warning">
-                                    Agentforce Not Available: {assistantStatusMessage}
-                                </div>
+                                <div class="usage-progress-banner-copy">{usageProgressMessage}</div>
                             </div>
                         </template>
 
-                        <div class="summary-grid slds-p-top_medium slds-p-bottom_medium">
+                        <div class={summaryGridClass} data-tour-id="usage-summary">
                             <div class="summary-tile">
-                                <div class="summary-label">Cleanliness Score</div>
+                                <div class="summary-label-row"><span class="summary-label">Cleanliness Score</span><lightning-helptext content="Overall Clarity360 health snapshot based on inventory quality, evidence, and recommendation signals."></lightning-helptext></div>
                                 <div class="summary-value">{summary.cleanlinessScore}%</div>
                             </div>
                             <div class="summary-tile">
-                                <div class="summary-label">Active Inventory</div>
+                                <div class="summary-label-row"><span class="summary-label">Active Inventory</span><lightning-helptext content="Total components currently tracked by Clarity360 in this dashboard snapshot."></lightning-helptext></div>
                                 <div class="summary-value">{summary.activeInventoryCount}</div>
                             </div>
                             <div class="summary-tile">
-                                <div class="summary-label">Usage Signals</div>
+                                <div class="summary-label-row"><span class="summary-label">Usage Signals</span><lightning-helptext content="Evidence records collected from scans that help decide whether components are active, low-signal, or unused."></lightning-helptext></div>
                                 <div class="summary-value">{summary.usageSignalCount}</div>
                             </div>
                             <div class="summary-tile">
-                                <div class="summary-label">Open Recommendations</div>
+                                <div class="summary-label-row"><span class="summary-label">Open Recommendations</span><lightning-helptext content="Recommendations that still need an accept, dismiss, or follow-up decision."></lightning-helptext></div>
                                 <div class="summary-value">{summary.openRecommendationCount}</div>
                             </div>
                             <div class="summary-tile">
-                                <div class="summary-label">Latest Job</div>
+                                <div class="summary-label-row"><span class="summary-label">Latest Job</span><lightning-helptext content="Most recent Clarity360 job status from the current dashboard snapshot."></lightning-helptext></div>
                                 <div class="summary-value small">{summary.latestJobStatus}</div>
                             </div>
                         </div>
+                        <template if:true={showSummaryRefreshState}>
+                            <div class="section-progress-note slds-p-bottom_medium">
+                                Refreshing Active Inventory, Usage Signals, and latest job totals. Existing values stay visible until the new snapshot arrives.
+                            </div>
+                        </template>
 
-                        <div class="inventory-filter-shell slds-p-bottom_medium">
+                        <div class="inventory-filter-shell slds-p-bottom_medium" data-tour-id="usage-filters">
                             <div class="inventory-filter-head">
                                 <div>
-                                    <div class="inventory-filter-title">Inventory Workspace</div>
+                                    <div class="inventory-filter-title inventory-filter-title-row">
+                                        <span>Inventory Workspace</span>
+                                        <lightning-helptext content="Use this shared workspace to narrow object, global component, and metadata findings without leaving the Usage tab."></lightning-helptext>
+                                    </div>
                                     <div class="inventory-filter-subtitle">
                                         Filter object usage, global components, and metadata usage from one place.
                                     </div>
@@ -167,6 +201,7 @@
                                         type="search"
                                         name="searchFilter"
                                         label="Search"
+                                        field-level-help="Search across fields, objects, reasons, and metadata names."
                                         value={searchFilter}
                                         oninput={handleSearchInputChange}
                                         onkeydown={handleSearchInputKeydown}
@@ -193,6 +228,7 @@
                                 <lightning-combobox
                                     name="inventoryHealth"
                                     label="Inventory Health"
+                                    field-level-help="Use this to focus on urgent items, healthy items, or a specific inventory state."
                                     value={inventoryHealthFilter}
                                     options={inventoryHealthOptions}
                                     onchange={handleInventoryHealthFilterChange}
@@ -200,6 +236,7 @@
                                 <lightning-combobox
                                     name="actionFilter"
                                     label="Recommendation Action"
+                                    field-level-help="Shows only recommendations for one action type such as deprecate or investigate dependencies."
                                     value={actionFilter}
                                     options={actionOptions}
                                     onchange={handleActionFilterChange}
@@ -207,6 +244,7 @@
                                 <lightning-combobox
                                     name="statusFilter"
                                     label="Recommendation Status"
+                                    field-level-help="Filter recommendations by whether they are still open, accepted, or dismissed."
                                     value={statusFilter}
                                     options={statusOptions}
                                     onchange={handleStatusFilterChange}
@@ -214,9 +252,23 @@
                             </div>
                         </div>
 
-                        <div class="inventory-stack slds-p-bottom_medium">
-                            <lightning-card title="Object Usage" icon-name="standard:entity">
+                        <div class={inventoryStackClass}>
+                            <lightning-card data-tour-id="usage-object-recommendations">
+                                <div slot="title" class="section-title-with-icon">
+                                    <span class="section-title-logo object-section-logo"></span>
+                                    <span>Object Usage</span>
+                                    <lightning-helptext content="Field-level recommendations driven by Clarity360 evidence such as usage signals, layouts, confidence, and risk."></lightning-helptext>
+                                </div>
                                 <div class="section-card-body">
+                                    <template if:true={showInventoryRefreshState}>
+                                        <div class="section-progress-banner">
+                                            <lightning-spinner size="x-small" alternative-text="Refreshing inventory"></lightning-spinner>
+                                            <div>
+                                                <div class="section-progress-title">Refreshing object usage workspace</div>
+                                                <div class="section-progress-copy">Recommendations, usage signals, global components, and metadata evidence are syncing.</div>
+                                            </div>
+                                        </div>
+                                    </template>
                                     <template if:true={hasRecommendations}>
                                         <lightning-accordion
                                             allow-multiple-sections-open
@@ -254,12 +306,16 @@
                                                                         <div class="recommendation-value">{row.usageDisplay}</div>
                                                                     </div>
                                                                     <div>
+                                                                        <div class="recommendation-label">On Layout</div>
+                                                                        <div class="recommendation-value">{row.onLayoutDisplay}</div>
+                                                                    </div>
+                                                                    <div>
                                                                         <div class="recommendation-label">Confidence</div>
-                                                                        <div class="recommendation-value">{row.confidenceDisplay}%</div>
+                                                                        <div class="recommendation-value">{row.confidenceDisplay}</div>
                                                                     </div>
                                                                     <div>
                                                                         <div class="recommendation-label">Risk</div>
-                                                                        <div class="recommendation-value">{row.riskDisplay}%</div>
+                                                                        <div class="recommendation-value">{row.riskDisplay}</div>
                                                                     </div>
                                                                     <div>
                                                                         <div class="recommendation-label">Status</div>
@@ -297,13 +353,18 @@
                                     </template>
                                     <template if:false={hasRecommendations}>
                                         <div class="section-empty">
-                                            No object recommendations match the current filters. Run Full Scan, then click Refresh.
+                                            Quiet for now. No object recommendations need attention in this view.
                                         </div>
                                     </template>
                                 </div>
                             </lightning-card>
 
-                            <lightning-card title="Global Components" icon-name="utility:layers">
+                            <lightning-card data-tour-id="usage-global-components">
+                                <div slot="title" class="section-title-with-icon">
+                                    <span class="section-title-logo global-section-logo"></span>
+                                    <span>Global Components</span>
+                                    <lightning-helptext content="Non-field components such as flows, triggers, validation rules, classes, and pages that Clarity360 can evaluate for cleanup or follow-up."></lightning-helptext>
+                                </div>
                                 <div class="section-card-body">
                                     <template if:true={hasGlobalComponents}>
                                         <div class="global-summary-strip">
@@ -393,19 +454,20 @@
                                     </template>
                                     <template if:false={hasGlobalComponents}>
                                         <div class="section-empty">
-                                            Global component inventory is currently hidden by filters or unavailable in the latest payload.
+                                            Nothing is calling for attention here. No global component findings match this view.
                                         </div>
                                     </template>
                                 </div>
                             </lightning-card>
 
-                            <template if:true={hasMetadataSection}>
-                                <lightning-card>
-                                    <div slot="title" class="section-title-with-icon">
-                                        <span class="section-title-logo metadata-section-logo"></span>
-                                        <span>Metadata Usage</span>
-                                    </div>
-                                    <div class="section-card-body">
+                            <lightning-card>
+                                <div slot="title" class="section-title-with-icon">
+                                    <span class="section-title-logo metadata-section-logo"></span>
+                                    <span>Metadata Usage</span>
+                                    <lightning-helptext content="Metadata inventory findings such as platform events, custom metadata, and other components with dependency or usage signals."></lightning-helptext>
+                                </div>
+                                <div class="section-card-body">
+                                    <template if:true={hasMetadataComponents}>
                                         <lightning-accordion
                                             allow-multiple-sections-open
                                             active-section-name={expandedMetadataGroups}
@@ -429,8 +491,12 @@
                                                                 </div>
                                                                 <div class="metadata-pill-row">
                                                                     <span class={row.priorityClass}>{row.priorityLabel}</span>
+                                                                    <template if:true={row.showUsageFlag}>
+                                                                        <span class={row.usageFlagClass}>{row.usageFlagLabel}</span>
+                                                                    </template>
                                                                     <span class="metadata-pill">References {row.referenceCount}</span>
                                                                     <span class="metadata-pill">Subscribers {row.activeSubscriberCount}</span>
+                                                                    <span class="metadata-pill">{row.publisherLabel}</span>
                                                                     <span class="metadata-pill">{row.monitoringEligibleLabel}</span>
                                                                     <span class="metadata-pill">Scanned {row.lastScannedDisplay}</span>
                                                                 </div>
@@ -442,129 +508,275 @@
                                                 </lightning-accordion-section>
                                             </template>
                                         </lightning-accordion>
-                                    </div>
-                                </lightning-card>
-                            </template>
+                                    </template>
+                                    <template if:false={hasMetadataComponents}>
+                                        <div class="section-empty">
+                                            Steady and simple. No metadata findings need review in this snapshot.
+                                        </div>
+                                    </template>
+                                </div>
+                            </lightning-card>
                         </div>
 
-                        <lightning-card title="Recent Jobs" icon-name="utility:sync">
-                            <div class="slds-p-horizontal_small slds-p-bottom_small">
-                                <lightning-datatable
-                                    key-field="Id"
-                                    data={jobs}
-                                    columns={jobColumns}
-                                    hide-checkbox-column
-                                ></lightning-datatable>
-                                <div class="jobs-pagination">
-                                    <lightning-button
-                                        label="Previous"
-                                        onclick={handlePreviousJobsPage}
-                                        disabled={previousJobsDisabled}
-                                    ></lightning-button>
-                                    <span class="jobs-page-label">{jobsPageLabel}</span>
-                                    <lightning-button
-                                        label="Next"
-                                        onclick={handleNextJobsPage}
-                                        disabled={nextJobsDisabled}
-                                    ></lightning-button>
+                        <lightning-card data-tour-id="usage-hygiene">
+                            <div slot="title" class="section-title-with-icon">
+                                <span class="section-title-logo hygiene-section-logo"></span>
+                                <span>Admin &amp; Access</span>
+                                <lightning-helptext content="Actionable admin and access cleanup findings only. Standard or namespaced Salesforce-owned artifacts are intentionally excluded from this section."></lightning-helptext>
+                            </div>
+                            <div class="section-card-body">
+                                <div class="inventory-filter-subtitle slds-m-bottom_small">
+                                    Review org-owned cleanup candidates that you can actually act on outside the runtime monitoring workspace.
                                 </div>
+                                <template if:true={hasHygieneFindings}>
+                                    <lightning-accordion allow-multiple-sections-open class="hygiene-accordion">
+                                        <template for:each={hygieneSections} for:item="section">
+                                            <lightning-accordion-section
+                                                key={section.key}
+                                                name={section.key}
+                                                label={section.label}
+                                            >
+                                                <div class="hygiene-section-copy">
+                                                    <div>{section.description}</div>
+                                                    <div class="hygiene-section-count">{section.countLabel} finding(s)</div>
+                                                </div>
+                                                <template if:true={section.hasRows}>
+                                                    <div class="monitoring-datatable-shell">
+                                                        <lightning-datatable
+                                                            key-field="key"
+                                                            data={section.rows}
+                                                            columns={hygieneColumns}
+                                                            hide-checkbox-column
+                                                        ></lightning-datatable>
+                                                    </div>
+                                                </template>
+                                                <template if:false={section.hasRows}>
+                                                    <div class="section-empty section-empty-inline">
+                                                        {section.emptyMessage}
+                                                    </div>
+                                                </template>
+                                            </lightning-accordion-section>
+                                        </template>
+                                    </lightning-accordion>
+                                </template>
+                                <template if:false={hasHygieneFindings}>
+                                    <div class="section-empty">
+                                        Calm and clear. No actionable admin or access cleanup items are visible right now.
+                                    </div>
+                                </template>
+                            </div>
+                        </lightning-card>
+
+                        <lightning-card data-tour-id="usage-job-issues">
+                            <div slot="title" class="section-title-with-icon">
+                                <span class="section-title-logo jobs-section-logo"></span>
+                                <span>Job Issues</span>
+                                <lightning-helptext content="Only Clarity360 jobs with logged errors are shown here so the Usage page stays focused on exceptions, not all job history."></lightning-helptext>
+                            </div>
+                            <div class="slds-p-horizontal_small slds-p-bottom_small">
+                                <template if:true={showJobsRefreshState}>
+                                    <div class="section-progress-banner section-progress-banner-jobs">
+                                        <lightning-spinner size="x-small" alternative-text="Refreshing jobs"></lightning-spinner>
+                                        <div>
+                                            <div class="section-progress-title">Refreshing job issues</div>
+                                            <div class="section-progress-copy">Only Clarity360 jobs with logged errors are shown here.</div>
+                                        </div>
+                                    </div>
+                                </template>
+                                <template if:true={hasFailedJobs}>
+                                    <lightning-datatable
+                                        key-field="Id"
+                                        data={failedJobs}
+                                        columns={jobIssueColumns}
+                                        hide-checkbox-column
+                                    ></lightning-datatable>
+                                </template>
+                                <template if:false={hasFailedJobs}>
+                                    <div class="section-empty">
+                                        Clean run. Clarity360 has not logged any job issues in this snapshot.
+                                    </div>
+                                </template>
                             </div>
                         </lightning-card>
                     </lightning-tab>
 
-                    <lightning-tab label="Monitoring" value="monitoring">
-                        <div class="monitoring-shell slds-p-top_small">
-                            <div class="monitoring-hero">
-                                <div class="monitoring-donut-card">
-                                    <div class="monitoring-donut" style={asyncUsageStyle}>
-                                        <div class="monitoring-donut-center">{asyncUsageLabel}</div>
-                                    </div>
-                                    <div class="monitoring-donut-label">Daily Async Apex</div>
-                                </div>
-                                <div class="monitoring-summary-grid">
-                                    <div class="summary-tile">
-                                        <div class="summary-label">Queueable Active</div>
-                                        <div class="summary-value">{monitoringSnapshot.queueableActiveCount}</div>
-                                    </div>
-                                    <div class="summary-tile">
-                                        <div class="summary-label">Batch Active</div>
-                                        <div class="summary-value">{monitoringSnapshot.batchActiveCount}</div>
-                                    </div>
-                                    <div class="summary-tile">
-                                        <div class="summary-label">Scheduled Jobs</div>
-                                        <div class="summary-value">{monitoringSnapshot.scheduledJobCount}</div>
-                                    </div>
-                                    <div class="summary-tile">
-                                        <div class="summary-label">Platform Events</div>
-                                        <div class="summary-value">{monitoringSnapshot.platformEventCount}</div>
-                                    </div>
-                                    <div class="summary-tile">
-                                        <div class="summary-label">Event Subscribers</div>
-                                        <div class="summary-value">{monitoringSnapshot.activePlatformSubscriberCount}</div>
+                    <lightning-tab label="Monitoring" value="monitoring" data-tab="monitoring" onactive={handleTabChange}>
+                        <div class={monitoringShellClass}>
+                            <template if:true={showMonitoringRefreshState}>
+                                <div class="section-progress-banner">
+                                    <lightning-spinner size="x-small" alternative-text="Refreshing monitoring"></lightning-spinner>
+                                    <div>
+                                        <div class="section-progress-title">Refreshing governor monitoring</div>
+                                        <div class="section-progress-copy">Limit metrics, scan trends, and platform event monitoring are being updated.</div>
                                     </div>
                                 </div>
-                            </div>
-
-                            <lightning-card title="Governor Limits" icon-name="utility:metrics">
-                                <div class="monitoring-table-wrap">
-                                    <table class="monitoring-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Metric</th>
-                                                <th>Used</th>
-                                                <th>Limit</th>
-                                                <th>Remaining</th>
-                                                <th>% Used</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <template for:each={monitoringLimitMetrics} for:item="metric">
-                                                <tr key={metric.key}>
-                                                    <td>{metric.label}</td>
-                                                    <td>{metric.usedValue}</td>
-                                                    <td>{metric.limitValue}</td>
-                                                    <td>{metric.remainingValue}</td>
-                                                    <td>{metric.pctUsed}%</td>
-                                                </tr>
-                                            </template>
-                                        </tbody>
-                                    </table>
+                            </template>
+                            <section class="monitoring-panel monitoring-panel-overview" data-tour-id="monitoring-overview">
+                                <div class="monitoring-panel-header">
+                                    <div class="monitoring-panel-title-row">
+                                        <h3 class="monitoring-panel-title">Monitoring Overview</h3>
+                                        <lightning-helptext content="This overview combines live Salesforce-reported monitoring signals with the event inventory discovered by Clarity360."></lightning-helptext>
+                                    </div>
+                                    <p class="monitoring-panel-copy">A short summary of each monitoring area. Open the workspace below for the full details.</p>
                                 </div>
-                            </lightning-card>
-
-                            <div class="slds-p-top_medium">
-                                <lightning-card title="Platform Event Monitoring" icon-name="utility:event">
-                                    <div class="monitoring-table-wrap">
-                                        <template if:true={hasPlatformEvents}>
-                                            <table class="monitoring-table">
-                                                <thead>
-                                                    <tr>
-                                                        <th>Event</th>
-                                                        <th>Subscribers</th>
-                                                        <th>References</th>
-                                                        <th>Last Scanned</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody>
-                                                    <template for:each={platformEventRows} for:item="row">
-                                                        <tr key={row.id}>
-                                                            <td>{row.displayName}</td>
-                                                            <td>{row.activeSubscriberCount}</td>
-                                                            <td>{row.referenceCount}</td>
-                                                            <td>{row.lastScannedOn}</td>
-                                                        </tr>
-                                                    </template>
-                                                </tbody>
-                                            </table>
-                                        </template>
-                                        <template if:false={hasPlatformEvents}>
-                                            <div class="slds-text-color_weak slds-p-vertical_small">
-                                                Platform event monitoring data will appear after metadata inventory includes event components.
+                                <div class="monitoring-overview-shell">
+                                    <div class="monitoring-stat-grid monitoring-stat-grid-wide">
+                                        <template for:each={monitoringKpiCards} for:item="card">
+                                            <div key={card.key} class={card.className}>
+                                                <div class="monitoring-stat-label">{card.label}</div>
+                                                <div class="monitoring-stat-value">{card.value}</div>
+                                                <div class="monitoring-stat-note">{card.note}</div>
                                             </div>
                                         </template>
                                     </div>
-                                </lightning-card>
-                            </div>
+                                </div>
+                            </section>
+
+                            <template if:true={showGovernorAttention}>
+                                <div class="status-warning slds-m-bottom_medium">
+                                    {governorAttentionMessage}
+                                </div>
+                            </template>
+
+                            <section class="monitoring-panel" data-tour-id="monitoring-workspace">
+                                <div class="monitoring-panel-header">
+                                    <div class="monitoring-workspace-head">
+                                        <div class="monitoring-panel-title-row">
+                                            <h3 class="monitoring-panel-title">Monitoring Workspace</h3>
+                                            <lightning-helptext content="Switch between limits, latest scan cost, and platform events without leaving this single workspace."></lightning-helptext>
+                                        </div>
+                                        <div class="monitoring-view-toggle">
+                                            <template for:each={monitoringViewButtons} for:item="button">
+                                                <lightning-button
+                                                    key={button.key}
+                                                    label={button.label}
+                                                    variant={button.variant}
+                                                    data-view={button.key}
+                                                    onclick={handleMonitoringViewChange}
+                                                ></lightning-button>
+                                            </template>
+                                        </div>
+                                    </div>
+                                    <p class="monitoring-panel-copy">
+                                        <template if:true={showMonitoringSignalsView}>Live Salesforce-reported runtime counts and automation activity.</template>
+                                        <template if:true={showMonitoringLimitsView}>Most-used org limits from Salesforce with explain actions.</template>
+                                        <template if:true={showMonitoringLatestView}>Latest completed scan snapshot with CPU, heap, SOQL, and async cost.</template>
+                                        <template if:true={showMonitoringEventsView}>Platform events, including events with no current usage signals.</template>
+                                    </p>
+                                </div>
+                                <template if:true={showMonitoringSignalsView}>
+                                    <div class="monitoring-panel-body" data-tour-id="monitoring-signals">
+                                        <div class="monitoring-visual-column">
+                                            <div class="monitoring-signal-panel">
+                                                <div class="monitoring-signal-title">Salesforce Reported</div>
+                                                <template for:each={monitoringSignalRows} for:item="row">
+                                                    <div key={row.key} class="monitoring-signal-row">
+                                                        <div class="monitoring-signal-row-head">
+                                                            <span>{row.label}</span>
+                                                            <strong>{row.value}</strong>
+                                                        </div>
+                                                        <div class="monitoring-signal-track">
+                                                            <span class="monitoring-signal-fill" style={row.barStyle}></span>
+                                                        </div>
+                                                        <div class="monitoring-signal-note">{row.note}</div>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </div>
+                                        <div class="monitoring-table-column">
+                                            <div class="monitoring-datatable-shell">
+                                                <lightning-datatable
+                                                    key-field="key"
+                                                    data={salesforceSignalRows}
+                                                    columns={salesforceSignalColumns}
+                                                    hide-checkbox-column
+                                                    onrowaction={handleMonitoringRowAction}
+                                                ></lightning-datatable>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+                                <template if:true={showMonitoringLimitsView}>
+                                    <div class="monitoring-panel-body" data-tour-id="monitoring-limits">
+                                        <div class="monitoring-visual-column">
+                                            <div class="monitoring-bar-stack">
+                                                <template for:each={governorChartRows} for:item="metric">
+                                                    <div key={metric.key} class="monitoring-bar-row">
+                                                        <div class="monitoring-bar-label">{metric.label}</div>
+                                                        <div class="monitoring-bar-track">
+                                                            <span class="monitoring-bar-fill" style={metric.barStyle}></span>
+                                                        </div>
+                                                        <div class="monitoring-bar-value">{metric.pctLabel}</div>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </div>
+                                        <div class="monitoring-table-column">
+                                            <div class="monitoring-datatable-shell">
+                                                <lightning-datatable
+                                                    key-field="key"
+                                                    data={governorLimitRows}
+                                                    columns={governorLimitColumns}
+                                                    hide-checkbox-column
+                                                    onrowaction={handleMonitoringRowAction}
+                                                ></lightning-datatable>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+                                <template if:true={showMonitoringLatestView}>
+                                    <div class="monitoring-panel-body" data-tour-id="monitoring-latest">
+                                        <template if:true={hasScanTrends}>
+                                            <div class="monitoring-visual-column">
+                                                <div class="monitoring-scan-summary-card">
+                                                    <div class="monitoring-scan-summary-label">Latest Scan</div>
+                                                    <div class="monitoring-scan-summary-title">{latestScanTitle}</div>
+                                                    <div class="monitoring-scan-summary-copy">{latestScanSupportLabel}</div>
+                                                </div>
+                                                <div class="monitoring-mini-card-grid slds-m-top_medium">
+                                                    <template for:each={latestTrendCards} for:item="card">
+                                                        <div key={card.key} class="monitoring-mini-card">
+                                                            <div class="summary-label">{card.label}</div>
+                                                            <div class="summary-value small">{card.value}</div>
+                                                        </div>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                            <div class="monitoring-table-column">
+                                                <div class="monitoring-datatable-shell">
+                                                    <lightning-datatable
+                                                        key-field="scanJobId"
+                                                        data={latestScanTrendRow}
+                                                        columns={scanTrendColumns}
+                                                        hide-checkbox-column
+                                                        onrowaction={handleMonitoringRowAction}
+                                                    ></lightning-datatable>
+                                                </div>
+                                            </div>
+                                        </template>
+                                        <template if:false={hasScanTrends}>
+                                            <div class="section-empty">
+                                                Scan trends will appear after completed inventory or usage scans persist governor summaries.
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+                                <template if:true={showMonitoringEventsView}>
+                                    <div class="monitoring-panel-body" data-tour-id="monitoring-events">
+                                        <div class="monitoring-table-column monitoring-table-column-wide">
+                                            <div class="monitoring-datatable-shell">
+                                                <lightning-datatable
+                                                    key-field="id"
+                                                    data={platformEventTableRows}
+                                                    columns={platformEventColumns}
+                                                    hide-checkbox-column
+                                                    onrowaction={handleMonitoringRowAction}
+                                                ></lightning-datatable>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+                            </section>
                         </div>
                     </lightning-tab>
                 </lightning-tabset>
@@ -639,6 +851,9 @@
                     <h2 class="slds-text-heading_medium">Recommended Next Steps</h2>
                 </header>
                 <div class="slds-modal__content slds-p-around_medium dependency-modal">
+                    <template if:true={isUsageDetailLoading}>
+                        <lightning-spinner size="small" alternative-text="Loading field details"></lightning-spinner>
+                    </template>
                     <div class="next-step-hero">
                         <div>
                             <div class="next-step-title">{selectedUsage.title}</div>
@@ -678,6 +893,9 @@
                         <p><strong>Sample Size:</strong> {selectedUsage.sampleSize}</p>
                         <p><strong>Non Null Count:</strong> {selectedUsage.nonNullCount}</p>
                         <p><strong>Has Data:</strong> {selectedUsage.hasData}</p>
+                        <p><strong>On Layout:</strong> {selectedUsage.isOnLayout}</p>
+                        <p><strong>Layouts:</strong> {selectedUsage.layoutNames}</p>
+                        <p><strong>Scan History:</strong> {selectedUsage.signalHistoryCount}</p>
                     </div>
                     <p class="dependency-guidance">{selectedUsage.deleteGuidance}</p>
                 </div>
@@ -691,6 +909,49 @@
                         ></lightning-button>
                     </template>
                     <lightning-button label="Close" onclick={handleCloseUsageModal}></lightning-button>
+                </footer>
+            </div>
+        </section>
+        <div class="slds-backdrop slds-backdrop_open"></div>
+    </template>
+
+    <template if:true={isFullScanModalOpen}>
+        <section role="dialog" tabindex="-1" aria-modal="true" class="slds-modal slds-fade-in-open">
+            <div class="slds-modal__container">
+                <header class="slds-modal__header">
+                    <lightning-button-icon
+                        icon-name="utility:close"
+                        variant="bare-inverse"
+                        alternative-text="Close"
+                        title="Close"
+                        onclick={handleCloseFullScanModal}
+                        class="slds-modal__close"
+                    ></lightning-button-icon>
+                    <h2 class="slds-text-heading_medium">Run Full Scan</h2>
+                </header>
+                <div class="slds-modal__content slds-p-around_medium">
+                    <p>Choose whether Clarity360 should generate and email a simple report after this full scan finishes.</p>
+                    <lightning-input
+                        class="slds-m-top_medium"
+                        type="checkbox"
+                        label="Generate report for this full scan"
+                        checked={generateReportOnFullScan}
+                        onchange={handleGenerateReportChange}
+                    ></lightning-input>
+                    <lightning-input
+                        class="slds-m-top_medium"
+                        type="email"
+                        label="Send report to"
+                        placeholder="Leave blank to send to your email"
+                        field-level-help="Optional. Enter an email address if this report should go somewhere else. If you leave this blank, Clarity360 sends it to the user who starts the scan."
+                        value={fullScanReportRecipient}
+                        disabled={isFullScanRecipientDisabled}
+                        onchange={handleFullScanReportRecipientChange}
+                    ></lightning-input>
+                </div>
+                <footer class="slds-modal__footer">
+                    <lightning-button label="Cancel" onclick={handleCloseFullScanModal}></lightning-button>
+                    <lightning-button variant="brand" label="Start Scan" onclick={handleConfirmFullScan}></lightning-button>
                 </footer>
             </div>
         </section>
@@ -747,5 +1008,75 @@
                 onclick={toggleChatWindow}
             ></lightning-button-icon>
         </div>
+    </template>
+
+    <template if:true={isTourOpen}>
+        <section class={tourCoachmarkClass} style={tourCoachmarkStyle} role="dialog" tabindex="-1" aria-label="Clarity360 dashboard guided tour">
+            <div class="tour-coachmark-header">
+                <div>
+                    <div class="tour-step-count">Step {currentTourStepNumber} of {tourStepCount}</div>
+                    <h2 class="tour-coachmark-title">{currentTourStep.title}</h2>
+                </div>
+                <lightning-button-icon
+                    icon-name="utility:close"
+                    alternative-text="Close guided tour"
+                    onclick={handleCloseTour}
+                ></lightning-button-icon>
+            </div>
+            <p class="tour-coachmark-body">{currentTourStep.body}</p>
+            <div class="tour-coachmark-footer">
+                <lightning-button label="Skip" onclick={handleCloseTour}></lightning-button>
+                <lightning-button label="Back" onclick={handlePreviousTourStep} disabled={disablePreviousTourStep}></lightning-button>
+                <lightning-button variant="brand" label={tourNextLabel} onclick={handleNextTourStep}></lightning-button>
+            </div>
+        </section>
+    </template>
+
+    <template if:true={isMonitoringDetailOpen}>
+        <section role="dialog" tabindex="-1" aria-modal="true" class="slds-modal slds-fade-in-open">
+            <div class="slds-modal__container">
+                <header class="slds-modal__header">
+                    <lightning-button-icon
+                        icon-name="utility:close"
+                        variant="bare-inverse"
+                        alternative-text="Close"
+                        title="Close"
+                        onclick={handleCloseMonitoringDetail}
+                        class="slds-modal__close"
+                    ></lightning-button-icon>
+                    <h2 class="slds-text-heading_medium">{monitoringDetailTitle}</h2>
+                    <template if:true={monitoringDetailSubtitle}>
+                        <p class="monitoring-detail-subtitle">{monitoringDetailSubtitle}</p>
+                    </template>
+                </header>
+                <div class="slds-modal__content slds-p-around_medium">
+                    <template if:true={isMonitoringDetailLoading}>
+                        <lightning-spinner size="small" alternative-text="Loading monitoring detail"></lightning-spinner>
+                    </template>
+                    <template if:true={monitoringDetail}>
+                        <p class="monitoring-detail-summary">{monitoringDetail.summary}</p>
+                        <template if:true={monitoringDetailHighlights}>
+                            <div class="monitoring-detail-highlights">
+                                <template for:each={monitoringDetailHighlights} for:item="item">
+                                    <div key={item} class="monitoring-detail-highlight">{item}</div>
+                                </template>
+                            </div>
+                        </template>
+                        <div class="monitoring-detail-grid">
+                            <template for:each={monitoringDetailItems} for:item="item">
+                                <div key={item.label} class="monitoring-detail-item">
+                                    <div class="recommendation-label">{item.label}</div>
+                                    <div class="recommendation-value">{item.value}</div>
+                                </div>
+                            </template>
+                        </div>
+                    </template>
+                </div>
+                <footer class="slds-modal__footer">
+                    <lightning-button label="Close" onclick={handleCloseMonitoringDetail}></lightning-button>
+                </footer>
+            </div>
+        </section>
+        <div class="slds-backdrop slds-backdrop_open"></div>
     </template>
 </template>

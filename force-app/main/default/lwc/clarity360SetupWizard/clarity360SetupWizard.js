@@ -10,6 +10,25 @@ import runInitialRun from '@salesforce/apex/Clarity360SetupWizardController.runI
 const LAST_STEP = 4;
 const STEP_STORAGE_KEY_PREFIX = 'clarity360.setup.currentStep';
 const STEP_OVERRIDE_KEY_PREFIX = 'clarity360.setup.overrideStep';
+const TOUR_STORAGE_KEY_PREFIX = 'clarity360.setup.tour.dismissed';
+const TOUR_STEPS = [
+    {
+        title: 'Welcome',
+        body: 'This wizard gets Clarity360 ready in a few clear steps: readiness, configuration, and your first scan.'
+    },
+    {
+        title: 'Readiness',
+        body: 'Run the readiness checks to confirm permissions, storage, async capacity, and optional integrations are in good shape.'
+    },
+    {
+        title: 'Configuration',
+        body: 'Choose whether to scan standard objects, how strict recommendations should be, and where scheduled reports should go.'
+    },
+    {
+        title: 'Initial Run',
+        body: 'Start the first run when you are ready. If you enable the usage scan, Clarity360 will also gather evidence for recommendations.'
+    }
+];
 const READINESS_GROUPS = [
     {
         key: 'configuration',
@@ -61,7 +80,11 @@ export default class Clarity360SetupWizard extends NavigationMixin(LightningElem
     @track excludedNamespaces = '';
     @track useNamedCredential = false;
     @track enableScheduledScan = false;
+    @track enableScheduledReports = false;
     @track scheduleFrequency = null;
+    @track scheduledReportRecipient = '';
+    @track isTourOpen = false;
+    @track currentTourStepIndex = 0;
 
     scheduleOptions = [
         { label: 'Daily', value: 'Daily' },
@@ -72,6 +95,7 @@ export default class Clarity360SetupWizard extends NavigationMixin(LightningElem
     connectedCallback() {
         this.restoreStepFromStorage();
         this.initialize();
+        this.openTourIfNeeded();
     }
 
     get currentStepValue() {
@@ -146,6 +170,14 @@ export default class Clarity360SetupWizard extends NavigationMixin(LightningElem
         return this.enableScheduledScan !== true;
     }
 
+    get isScheduledReportsDisabled() {
+        return this.enableScheduledScan !== true;
+    }
+
+    get isScheduledReportRecipientDisabled() {
+        return this.enableScheduledScan !== true || this.enableScheduledReports !== true;
+    }
+
     get nextLabel() {
         return this.currentStep === LAST_STEP ? 'Finish Setup' : 'Next';
     }
@@ -166,6 +198,26 @@ export default class Clarity360SetupWizard extends NavigationMixin(LightningElem
 
     get advancedToggleLabel() {
         return this.showAdvancedOptions ? 'Hide' : 'Show';
+    }
+
+    get currentTourStep() {
+        return TOUR_STEPS[this.currentTourStepIndex] || TOUR_STEPS[0];
+    }
+
+    get currentTourStepNumber() {
+        return this.currentTourStepIndex + 1;
+    }
+
+    get tourStepCount() {
+        return TOUR_STEPS.length;
+    }
+
+    get disablePreviousTourStep() {
+        return this.currentTourStepIndex <= 0;
+    }
+
+    get tourNextLabel() {
+        return this.currentTourStepIndex >= TOUR_STEPS.length - 1 ? 'Finish Tour' : 'Next';
     }
 
     async initialize() {
@@ -232,10 +284,22 @@ export default class Clarity360SetupWizard extends NavigationMixin(LightningElem
         const enabled = event.target.checked;
         this.enableScheduledScan = enabled;
         this.scheduleFrequency = enabled ? this.scheduleFrequency : null;
+        this.enableScheduledReports = enabled ? this.enableScheduledReports : false;
+        this.scheduledReportRecipient = enabled ? this.scheduledReportRecipient : '';
     }
 
     handleScheduleFrequencyChange(event) {
         this.scheduleFrequency = event.detail?.value || null;
+    }
+
+    handleEnableScheduledReportsChange(event) {
+        const enabled = event.target.checked;
+        this.enableScheduledReports = enabled;
+        this.scheduledReportRecipient = enabled ? this.scheduledReportRecipient : '';
+    }
+
+    handleScheduledReportRecipientChange(event) {
+        this.scheduledReportRecipient = event.detail?.value || '';
     }
 
     handleToggleGroup(event) {
@@ -255,6 +319,28 @@ export default class Clarity360SetupWizard extends NavigationMixin(LightningElem
 
     handleToggleAdvanced() {
         this.showAdvancedOptions = !this.showAdvancedOptions;
+    }
+
+    handleOpenTour() {
+        this.currentTourStepIndex = 0;
+        this.isTourOpen = true;
+    }
+
+    handleCloseTour() {
+        this.isTourOpen = false;
+        this.persistTourDismissed();
+    }
+
+    handlePreviousTourStep() {
+        this.currentTourStepIndex = Math.max(0, this.currentTourStepIndex - 1);
+    }
+
+    handleNextTourStep() {
+        if (this.currentTourStepIndex >= TOUR_STEPS.length - 1) {
+            this.handleCloseTour();
+            return;
+        }
+        this.currentTourStepIndex += 1;
     }
 
     async handleStartInitialRun() {
@@ -325,6 +411,8 @@ export default class Clarity360SetupWizard extends NavigationMixin(LightningElem
                 useNamedCredential: this.useNamedCredential,
                 enableScheduledScan: this.enableScheduledScan,
                 scheduleFrequency: this.enableScheduledScan ? this.scheduleFrequency : null,
+                enableScheduledReports: this.enableScheduledScan ? this.enableScheduledReports : false,
+                scheduledReportRecipient: this.enableScheduledScan && this.enableScheduledReports ? this.scheduledReportRecipient : '',
                 markSetupComplete
             });
             this.applyLoadedConfig(response?.config || {});
@@ -468,9 +556,20 @@ export default class Clarity360SetupWizard extends NavigationMixin(LightningElem
             this.enableScheduledScan = scheduledScanInput.checked === true;
         }
 
+        const scheduledReportsInput = this.template.querySelector('[data-field="enableScheduledReports"]');
+        if (scheduledReportsInput) {
+            this.enableScheduledReports = this.enableScheduledScan && scheduledReportsInput.checked === true;
+        }
+
         const scheduleFrequencyInput = this.template.querySelector('[data-field="scheduleFrequency"]');
         this.scheduleFrequency =
             this.enableScheduledScan && scheduleFrequencyInput ? scheduleFrequencyInput.value || null : null;
+
+        const scheduledReportRecipientInput = this.template.querySelector('[data-field="scheduledReportRecipient"]');
+        if (scheduledReportRecipientInput) {
+            this.scheduledReportRecipient =
+                this.enableScheduledScan && this.enableScheduledReports ? scheduledReportRecipientInput.value || '' : '';
+        }
     }
 
     applyLoadedConfig(loadedConfig) {
@@ -481,6 +580,31 @@ export default class Clarity360SetupWizard extends NavigationMixin(LightningElem
         this.excludedNamespaces = loadedConfig?.excludedNamespaces || '';
         this.useNamedCredential = loadedConfig?.useNamedCredential === true;
         this.enableScheduledScan = loadedConfig?.enableScheduledScan === true || loadedConfig?.scheduleEnabled === true;
+        this.enableScheduledReports = this.enableScheduledScan && loadedConfig?.enableScheduledReports === true;
         this.scheduleFrequency = loadedConfig?.scheduleFrequency || null;
+        this.scheduledReportRecipient = this.enableScheduledReports ? loadedConfig?.scheduledReportRecipient || '' : '';
+    }
+
+    openTourIfNeeded() {
+        try {
+            const dismissed = window.localStorage.getItem(this.getTourStorageKey());
+            if (!dismissed) {
+                this.isTourOpen = true;
+            }
+        } catch {
+            this.isTourOpen = true;
+        }
+    }
+
+    persistTourDismissed() {
+        try {
+            window.localStorage.setItem(this.getTourStorageKey(), 'true');
+        } catch {
+            // Ignore storage access failures in restricted browsing contexts.
+        }
+    }
+
+    getTourStorageKey() {
+        return `${TOUR_STORAGE_KEY_PREFIX}.${window.location.hostname}`;
     }
 }

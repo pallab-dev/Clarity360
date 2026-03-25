@@ -61,6 +61,7 @@ public with sharing class UsageScanBatch implements Database.Batchable<String>, 
 
             processedObjects++;
             updateProgress();
+            GovernorTrendService.captureCurrentTransaction(scanJobId, 'UsageScan');
         }
     }
 
@@ -86,6 +87,7 @@ public with sharing class UsageScanBatch implements Database.Batchable<String>, 
                 job.ProgressPct__c = 100;
                 job.FinishedOn__c = System.now();
                 ScanJobRepository.safeUpdate(job);
+                Clarity360ScanReportService.notifyIfNeeded(job.Id);
             } catch (Exception ignored) {
                 // Prevent scan job logging failures from marking batch as failed.
             }

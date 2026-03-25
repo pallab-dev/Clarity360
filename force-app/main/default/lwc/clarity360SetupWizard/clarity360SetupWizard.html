@@ -18,9 +18,17 @@
         <div class="slds-p-horizontal_medium slds-p-bottom_medium">
             <template if:true={isStepWelcome}>
                 <div class="panel">
-                    <h2 class="slds-text-heading_small slds-m-bottom_x-small">Welcome to Clarity360</h2>
-                    <p>Setup will validate org readiness, save runtime configuration, and optionally start your initial scans.</p>
-                    <p class="slds-m-top_x-small">Estimated time: 5-10 minutes.</p>
+                    <div class="tour-head">
+                        <div>
+                            <h2 class="slds-text-heading_small slds-m-bottom_x-small">Welcome to Clarity360</h2>
+                            <p>Setup will validate org readiness, save runtime configuration, and optionally start your initial scans.</p>
+                            <p class="slds-m-top_x-small">Estimated time: 5-10 minutes.</p>
+                        </div>
+                        <lightning-button label="Take Guided Tour" onclick={handleOpenTour}></lightning-button>
+                    </div>
+                    <div class="tour-summary slds-m-top_small">
+                        <strong>Quick start:</strong> Run readiness checks, choose scan scope, add the scheduled report email if you want admin summaries, then launch the first scan.
+                    </div>
                 </div>
             </template>
 
@@ -73,6 +81,7 @@
                             class="slds-m-top_small"
                             type="toggle"
                             label="Include Standard Objects"
+                            field-level-help="Turn this on when you want Clarity360 to review both standard and custom objects. Turn it off to focus only on custom objects."
                             message-toggle-active="Included"
                             message-toggle-inactive="Custom objects only"
                             checked={includeStandardObjects}
@@ -88,6 +97,7 @@
                             class="slds-m-top_small"
                             type="number"
                             label="Coverage Threshold (%)"
+                            field-level-help="This is the coverage level Clarity360 uses when it interprets Apex evidence. Higher values are stricter."
                             value={coverageThreshold}
                             data-field="coverageThreshold"
                             min="0"
@@ -113,12 +123,14 @@
                             <div class="advanced-grid slds-m-top_small">
                                 <lightning-textarea
                                     label="Excluded Objects"
+                                    field-level-help="Add object API names to skip from scans, separated by commas or new lines."
                                     value={excludedObjects}
                                     data-field="excludedObjects"
                                     onchange={handleExcludedObjectsChange}
                                 ></lightning-textarea>
                                 <lightning-textarea
                                     label="Excluded Namespaces"
+                                    field-level-help="Use this when you want to ignore managed package namespaces during analysis."
                                     value={excludedNamespaces}
                                     data-field="excludedNamespaces"
                                     onchange={handleExcludedNamespacesChange}
@@ -126,6 +138,7 @@
                                 <lightning-input
                                     type="checkbox"
                                     label="Use Named Credential"
+                                    field-level-help="Recommended for secure, reliable metadata callouts."
                                     checked={useNamedCredential}
                                     data-field="useNamedCredential"
                                     onchange={handleUseNamedCredentialChange}
@@ -133,13 +146,34 @@
                                 <lightning-input
                                     type="checkbox"
                                     label="Enable Scheduled Scan"
+                                    field-level-help="Turns on automatic recurring full scans."
                                     checked={enableScheduledScan}
                                     data-field="enableScheduledScan"
                                     onchange={handleEnableScheduledScanChange}
                                 ></lightning-input>
+                                <lightning-input
+                                    type="checkbox"
+                                    label="Send Scheduled Scan Report"
+                                    field-level-help="When enabled, Clarity360 emails a report after each scheduled full scan."
+                                    checked={enableScheduledReports}
+                                    data-field="enableScheduledReports"
+                                    disabled={isScheduledReportsDisabled}
+                                    onchange={handleEnableScheduledReportsChange}
+                                ></lightning-input>
+                                <lightning-input
+                                    type="email"
+                                    label="Scheduled Report Email"
+                                    field-level-help="Optional. Enter an address if scheduled reports should go to a shared mailbox or admin inbox. Leave it blank to send the report to the user who owns the schedule run."
+                                    placeholder="Leave blank to send to the scheduling user"
+                                    value={scheduledReportRecipient}
+                                    data-field="scheduledReportRecipient"
+                                    disabled={isScheduledReportRecipientDisabled}
+                                    onchange={handleScheduledReportRecipientChange}
+                                ></lightning-input>
                                 <template if:true={showScheduleControls}>
                                     <lightning-combobox
                                         label="Schedule Frequency"
+                                        field-level-help="Choose how often Clarity360 should run the scheduled full scan."
                                         value={scheduleFrequency}
                                         options={scheduleOptions}
                                         data-field="scheduleFrequency"
@@ -165,6 +199,7 @@
                     <lightning-input
                         type="checkbox"
                         label="Also run usage scan after inventory"
+                        field-level-help="Recommended when you want the first run to include actual field usage evidence and recommendations."
                         checked={runUsageScan}
                         onchange={handleRunUsageChange}
                     ></lightning-input>
@@ -182,5 +217,31 @@
             <lightning-button label="Back" onclick={handleBack} disabled={disableBack}></lightning-button>
             <lightning-button variant="brand" label={nextLabel} onclick={handleNext} disabled={disableNext}></lightning-button>
         </div>
+
+        <template if:true={isTourOpen}>
+            <section role="dialog" tabindex="-1" class="slds-modal slds-fade-in-open" aria-modal="true" aria-label="Clarity360 guided tour">
+                <div class="slds-modal__container">
+                    <header class="slds-modal__header">
+                        <lightning-button-icon
+                            icon-name="utility:close"
+                            alternative-text="Close guided tour"
+                            class="slds-modal__close"
+                            onclick={handleCloseTour}
+                        ></lightning-button-icon>
+                        <h2 class="slds-text-heading_medium">Setup Guided Tour</h2>
+                    </header>
+                    <div class="slds-modal__content slds-p-around_medium">
+                        <div class="tour-step-count">Step {currentTourStepNumber} of {tourStepCount}</div>
+                        <h3 class="slds-text-heading_small slds-m-top_x-small">{currentTourStep.title}</h3>
+                        <p class="slds-m-top_small">{currentTourStep.body}</p>
+                    </div>
+                    <footer class="slds-modal__footer">
+                        <lightning-button label="Back" onclick={handlePreviousTourStep} disabled={disablePreviousTourStep}></lightning-button>
+                        <lightning-button variant="brand" label={tourNextLabel} onclick={handleNextTourStep}></lightning-button>
+                    </footer>
+                </div>
+            </section>
+            <div class="slds-backdrop slds-backdrop_open"></div>
+        </template>
     </lightning-card>
 </template>

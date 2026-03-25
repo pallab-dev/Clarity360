@@ -146,6 +146,23 @@ private class Clarity360AgentActionsTest {
     }
 
     @IsTest
+    static void explainRecommendationHandlesNullAndBlankRequestsInsideList() {
+        Clarity360AgentActions.ExplainRecommendationRequest blankRequest =
+            new Clarity360AgentActions.ExplainRecommendationRequest();
+
+        Test.startTest();
+        List<Clarity360AgentActions.AgentActionResult> results =
+            Clarity360AgentActions.explainRecommendation(
+                new List<Clarity360AgentActions.ExplainRecommendationRequest>{ null, blankRequest }
+            );
+        Test.stopTest();
+
+        System.assertEquals(2, results.size());
+        System.assertEquals('Not Found', results[0].status);
+        System.assertEquals('Not Found', results[1].status);
+    }
+
+    @IsTest
     static void getHighRiskRecommendationsFiltersAndReturnsRows() {
         seedData();
 
@@ -237,5 +254,103 @@ private class Clarity360AgentActionsTest {
         System.assertEquals(1, results.size(), 'One envelope should be returned.');
         System.assertEquals('No Data', results[0].status, 'Lookback should exclude the old job.');
         System.assertEquals('GetRecentScanSummary', results[0].action, 'The action should identify the summary request.');
+    }
+
+    @IsTest
+    static void explainRecommendationReturnsNotFoundForUnknownFieldKey() {
+        Clarity360AgentActions.ExplainRecommendationRequest request =
+            new Clarity360AgentActions.ExplainRecommendationRequest();
+        request.fieldKey = 'Account.Unknown_Field__c';
+
+        Test.startTest();
+        List<Clarity360AgentActions.AgentActionResult> results =
+            Clarity360AgentActions.explainRecommendation(
+                new List<Clarity360AgentActions.ExplainRecommendationRequest>{ request }
+            );
+        Test.stopTest();
+
+        System.assertEquals(1, results.size());
+        System.assertEquals('Not Found', results[0].status);
+        System.assertEquals('ExplainRecommendation', results[0].action);
+    }
+
+    @IsTest
+    static void getHighRiskRecommendationsUsesDefaultRequestWhenInputMissing() {
+        seedData();
+
+        Test.startTest();
+        List<Clarity360AgentActions.AgentActionResult> results =
+            Clarity360AgentActions.getHighRiskRecommendations(null);
+        Test.stopTest();
+
+        System.assert(!results.isEmpty());
+        System.assert(results[0].riskScore >= 70);
+    }
+
+    @IsTest
+    static void getHighRiskRecommendationsClampsInputsAndIgnoresInvalidStatus() {
+        seedData();
+
+        Clarity360AgentActions.GetHighRiskRecommendationsRequest request =
+            new Clarity360AgentActions.GetHighRiskRecommendationsRequest();
+        request.minRiskScore = -10;
+        request.maxResults = 999;
+        request.statusFilter = 'InvalidStatus';
+
+        Test.startTest();
+        List<Clarity360AgentActions.AgentActionResult> results =
+            Clarity360AgentActions.getHighRiskRecommendations(
+                new List<Clarity360AgentActions.GetHighRiskRecommendationsRequest>{ request }
+            );
+        Test.stopTest();
+
+        System.assert(!results.isEmpty());
+        System.assert(results[0].riskScore >= 0);
+    }
+
+    @IsTest
+    static void getHighRiskRecommendationsClampsToUpperAndLowerBounds() {
+        seedData();
+
+        Clarity360AgentActions.GetHighRiskRecommendationsRequest request =
+            new Clarity360AgentActions.GetHighRiskRecommendationsRequest();
+        request.minRiskScore = 150;
+        request.maxResults = 0;
+
+        Test.startTest();
+        List<Clarity360AgentActions.AgentActionResult> results =
+            Clarity360AgentActions.getHighRiskRecommendations(
+                new List<Clarity360AgentActions.GetHighRiskRecommendationsRequest>{ request }
+            );
+        Test.stopTest();
+
+        System.assertEquals(1, results.size());
+        System.assertEquals('No Data', results[0].status);
+    }
+
+    @IsTest
+    static void getRecentScanSummaryPrefersErrorMessageWhenPresent() {
+        ScanJob__c erroredJob = new ScanJob__c(
+            JobType__c = 'Usage Scan',
+            Status__c = 'Failed',
+            StartedOn__c = System.now().addMinutes(-20),
+            FinishedOn__c = System.now().addMinutes(-10),
+            ScopeSummary__c = 'Scope summary fallback',
+            ErrorMessage__c = 'Governor limit reached.'
+        );
+        insert erroredJob;
+
+        Clarity360AgentActions.GetRecentScanSummaryRequest request =
+            new Clarity360AgentActions.GetRecentScanSummaryRequest();
+        request.lookbackDays = 30;
+
+        Test.startTest();
+        List<Clarity360AgentActions.AgentActionResult> results =
+            Clarity360AgentActions.getRecentScanSummary(
+                new List<Clarity360AgentActions.GetRecentScanSummaryRequest>{ request }
+            );
+        Test.stopTest();
+
+        System.assertEquals('Governor limit reached.', results[0].explanation);
     }
 }

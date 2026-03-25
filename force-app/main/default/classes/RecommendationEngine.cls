@@ -94,11 +94,13 @@ public with sharing class RecommendationEngine {
             if (!InventoryService.isObjectInRecommendationScope(inventory.ObjectApiName__c, inventory.ObjectApiName__c != null && inventory.ObjectApiName__c.endsWith('__c'))) {
                 continue;
             }
+            Boolean deleteSafeCustomField = isDeleteSafeCustomField(inventory.ObjectApiName__c, inventory.FieldApiName__c);
 
             String action = 'Investigate Dependencies';
             Decimal confidence = 75;
             Decimal risk = 30;
             Decimal nullRate = (signal.NullRatePct__c == null) ? 100 : signal.NullRatePct__c;
+            Boolean isOnLayout = signal.IsOnLayout__c == true;
             Map<String, String> parsedEvidence = parser.parse(signal.EvidenceSummary__c);
             Boolean hasData = extractBoolean(
                 parsedEvidence,
@@ -156,6 +158,8 @@ public with sharing class RecommendationEngine {
             } else if (
                 meetsMinRecordThreshold &&
                 activeDependencyCount == 0 &&
+                isOnLayout != true &&
+                deleteSafeCustomField == true &&
                 (avgApexCoveragePct == null || avgApexCoveragePct >= apexCoverageThreshold)
             ) {
                 action = 'Deprecate';
@@ -170,6 +174,16 @@ public with sharing class RecommendationEngine {
             if (activeDependencyCount == 0 && inactiveDependencyCount > 0 && action == 'Deprecate') {
                 action = 'Investigate Dependencies';
                 confidence = 65;
+                risk = Math.max(risk, 45);
+            }
+            if (isOnLayout == true && action == 'Deprecate') {
+                action = 'Investigate Dependencies';
+                confidence = Math.min(confidence, 65);
+                risk = Math.max(risk, 45);
+            }
+            if (deleteSafeCustomField != true && action == 'Deprecate') {
+                action = 'Investigate Dependencies';
+                confidence = Math.min(confidence, 65);
                 risk = Math.max(risk, 45);
             }
 
@@ -196,9 +210,11 @@ public with sharing class RecommendationEngine {
             evidence += '; MinObjectRecordCount=' + minRecordThreshold;
             evidence += '; MeetsMinRecordThreshold=' + meetsMinRecordThreshold;
             evidence += '; ApexClassRefs=' + apexClassRefs;
-            evidence += '; AvgApexCoveragePct=' + (avgApexCoveragePct == null ? 'Unknown' : String.valueOf(avgApexCoveragePct));
+            evidence += '; AvgApexCoveragePct=' + formatCoveragePct(avgApexCoveragePct);
             evidence += '; CoverageThreshold=' + apexCoverageThreshold;
             evidence += '; LowUsageNullRateThreshold=' + lowUsageNullRateThreshold;
+            evidence += '; DeleteSafeCustomField=' + String.valueOf(deleteSafeCustomField);
+            evidence += '; IsOnLayout=' + String.valueOf(isOnLayout);
 
             recommendations.add(new Recommendation__c(
                 FieldKey__c = signal.FieldKey__c,
@@ -379,15 +395,16 @@ public with sharing class RecommendationEngine {
         return recommendations;
     }
 
+    @TestVisible
     private static List<Recommendation__c> buildGlobalTriggerRecommendations(Datetime evaluatedAt, Integer maxRows) {
         List<Recommendation__c> recommendations = new List<Recommendation__c>();
-
         ToolingApiService.ToolingQueryResult queryResult = ToolingApiService.query(
-            'SELECT Id, Name, Status FROM ApexTrigger ORDER BY Name',
+            'SELECT Id, Name, Status, TableEnumOrId, Body FROM ApexTrigger ORDER BY Name',
             maxRows
         );
 
         if (queryResult.success && !queryResult.records.isEmpty()) {
+            Map<String, Integer> activeTriggerCountByObject = countActiveTriggersByObject(queryResult.records);
             for (Map<String, Object> row : queryResult.records) {
                 String name = ToolingApiService.getString(row, 'Name');
                 if (String.isBlank(name)) {
@@ -395,17 +412,39 @@ public with sharing class RecommendationEngine {
                 }
                 String status = ToolingApiService.getString(row, 'Status');
                 Boolean isActive = status == 'Active';
-                if (isActive) {
+                String objectName = ToolingApiService.getString(row, 'TableEnumOrId');
+                String body = ToolingApiService.getString(row, 'Body');
+                Boolean hasMultipleActiveTriggers =
+                    !String.isBlank(objectName) &&
+                    activeTriggerCountByObject.containsKey(objectName) &&
+                    activeTriggerCountByObject.get(objectName) > 1;
+                Boolean lacksHandlerFramework = hasTriggerWithoutHandlerFramework(body);
+                Boolean hasMixedDmlSignal = hasMixedDmlSignal(body);
+                if (isActive && !hasMultipleActiveTriggers && !lacksHandlerFramework && !hasMixedDmlSignal) {
                     continue;
                 }
+                TriggerRiskAssessment assessment = assessTriggerRisk(
+                    status,
+                    objectName,
+                    activeTriggerCountByObject.containsKey(objectName) ? activeTriggerCountByObject.get(objectName) : 0,
+                    hasMultipleActiveTriggers,
+                    lacksHandlerFramework,
+                    hasMixedDmlSignal
+                );
                 recommendations.add(new Recommendation__c(
                     FieldKey__c = 'GLOBAL.TRIGGER.' + name,
                     Action__c = 'Investigate Dependencies',
-                    ConfidenceScore__c = 85,
-                    RiskScore__c = 45,
+                    ConfidenceScore__c = assessment.confidence,
+                    RiskScore__c = assessment.risk,
                     EvidenceSummary__c =
                         'Scope=Global; ComponentType=Trigger; ComponentName=' + name +
+                        '; Object=' + objectName +
                         '; ComponentStatus=' + status +
+                        '; ActiveTriggerCountForObject=' + assessment.activeTriggerCount +
+                        '; HasMultipleActiveTriggers=' + hasMultipleActiveTriggers +
+                        '; LacksHandlerFramework=' + lacksHandlerFramework +
+                        '; MixedDmlSignal=' + hasMixedDmlSignal +
+                        '; Reason=' + assessment.reason +
                         '; Source=ToolingAPI',
                     Status__c = 'Open',
                     LastEvaluatedOn__c = evaluatedAt
@@ -414,20 +453,43 @@ public with sharing class RecommendationEngine {
             return recommendations;
         }
 
-        for (ApexTrigger triggerRow : [SELECT Name, Status FROM ApexTrigger LIMIT :maxRows]) {
+        List<ApexTrigger> triggers = [SELECT Name, Status, TableEnumOrId, Body FROM ApexTrigger LIMIT :maxRows];
+        Map<String, Integer> activeTriggerCountByObject = countActiveTriggersByObject(triggers);
+        for (ApexTrigger triggerRow : triggers) {
             String status = String.valueOf(triggerRow.Status);
             Boolean isActive = status == 'Active';
-            if (isActive) {
+            String objectName = String.valueOf(triggerRow.TableEnumOrId);
+            Boolean hasMultipleActiveTriggers =
+                !String.isBlank(objectName) &&
+                activeTriggerCountByObject.containsKey(objectName) &&
+                activeTriggerCountByObject.get(objectName) > 1;
+            Boolean lacksHandlerFramework = hasTriggerWithoutHandlerFramework(triggerRow.Body);
+            Boolean hasMixedDmlSignal = hasMixedDmlSignal(triggerRow.Body);
+            if (isActive && !hasMultipleActiveTriggers && !lacksHandlerFramework && !hasMixedDmlSignal) {
                 continue;
             }
+            TriggerRiskAssessment assessment = assessTriggerRisk(
+                status,
+                objectName,
+                activeTriggerCountByObject.containsKey(objectName) ? activeTriggerCountByObject.get(objectName) : 0,
+                hasMultipleActiveTriggers,
+                lacksHandlerFramework,
+                hasMixedDmlSignal
+            );
             recommendations.add(new Recommendation__c(
                 FieldKey__c = 'GLOBAL.TRIGGER.' + triggerRow.Name,
                 Action__c = 'Investigate Dependencies',
-                ConfidenceScore__c = 85,
-                RiskScore__c = 45,
+                ConfidenceScore__c = assessment.confidence,
+                RiskScore__c = assessment.risk,
                 EvidenceSummary__c =
                     'Scope=Global; ComponentType=Trigger; ComponentName=' + triggerRow.Name +
+                    '; Object=' + objectName +
                     '; ComponentStatus=' + status +
+                    '; ActiveTriggerCountForObject=' + assessment.activeTriggerCount +
+                    '; HasMultipleActiveTriggers=' + hasMultipleActiveTriggers +
+                    '; LacksHandlerFramework=' + lacksHandlerFramework +
+                    '; MixedDmlSignal=' + hasMixedDmlSignal +
+                    '; Reason=' + assessment.reason +
                     '; Source=SOQLFallback',
                 Status__c = 'Open',
                 LastEvaluatedOn__c = evaluatedAt
@@ -440,7 +502,8 @@ public with sharing class RecommendationEngine {
     private static List<Recommendation__c> buildGlobalValidationRecommendations(Datetime evaluatedAt, Integer maxRows) {
         List<Recommendation__c> recommendations = new List<Recommendation__c>();
         ToolingApiService.ToolingQueryResult queryResult = ToolingApiService.query(
-            'SELECT Id, ValidationName, Active, EntityDefinition.QualifiedApiName FROM ValidationRule ORDER BY ValidationName',
+            'SELECT Id, ValidationName, Active, LastModifiedDate, EntityDefinition.QualifiedApiName ' +
+            'FROM ValidationRule ORDER BY ValidationName',
             maxRows
         );
 
@@ -451,11 +514,12 @@ public with sharing class RecommendationEngine {
                 String objectName = ToolingApiService.getNestedString(row, 'EntityDefinition', 'QualifiedApiName');
                 Boolean active = ToolingApiService.getBoolean(row, 'Active');
                 Boolean isActive = active == true;
+                Datetime lastModifiedDate = parseDatetime(ToolingApiService.getString(row, 'LastModifiedDate'));
                 if (String.isBlank(ruleName)) {
                     ruleName = String.isBlank(id) ? 'UnnamedValidationRule' : id;
                 }
 
-                if (isActive) {
+                if (!shouldFlagInactiveMetadata(isActive, null, lastModifiedDate)) {
                     continue;
                 }
                 recommendations.add(new Recommendation__c(
@@ -467,6 +531,7 @@ public with sharing class RecommendationEngine {
                         'Scope=Global; ComponentType=ValidationRule; ComponentName=' + ruleName +
                         '; Object=' + objectName +
                         '; ComponentStatus=' + (isActive ? 'Active' : 'Inactive') +
+                        '; LastModifiedDate=' + String.valueOf(lastModifiedDate) +
                         '; Source=ToolingAPI',
                     Status__c = 'Open',
                     LastEvaluatedOn__c = evaluatedAt
@@ -477,7 +542,8 @@ public with sharing class RecommendationEngine {
 
         try {
             List<SObject> fallbackRows = Database.query(
-                'SELECT Id, Active, ValidationName, EntityDefinition.QualifiedApiName FROM ValidationRule LIMIT ' + maxRows
+                'SELECT Id, Active, LastModifiedDate, ValidationName, EntityDefinition.QualifiedApiName ' +
+                'FROM ValidationRule LIMIT ' + maxRows
             );
             for (SObject row : fallbackRows) {
                 String id = String.valueOf(row.get('Id'));
@@ -493,7 +559,8 @@ public with sharing class RecommendationEngine {
                     objectName = null;
                 }
                 Boolean isActive = (Boolean) row.get('Active');
-                if (isActive) {
+                Datetime lastModifiedDate = (Datetime) row.get('LastModifiedDate');
+                if (!shouldFlagInactiveMetadata(isActive, null, lastModifiedDate)) {
                     continue;
                 }
                 recommendations.add(new Recommendation__c(
@@ -505,6 +572,7 @@ public with sharing class RecommendationEngine {
                         'Scope=Global; ComponentType=ValidationRule; ComponentName=' + ruleName +
                         '; Object=' + objectName +
                         '; ComponentStatus=' + (isActive ? 'Active' : 'Inactive') +
+                        '; LastModifiedDate=' + String.valueOf(lastModifiedDate) +
                         '; Source=SOQLFallback',
                     Status__c = 'Open',
                     LastEvaluatedOn__c = evaluatedAt
@@ -519,7 +587,8 @@ public with sharing class RecommendationEngine {
     private static List<Recommendation__c> buildGlobalFlowRecommendations(Datetime evaluatedAt, Integer maxRows) {
         List<Recommendation__c> recommendations = new List<Recommendation__c>();
         ToolingApiService.ToolingQueryResult queryResult = ToolingApiService.query(
-            'SELECT Id, MasterLabel, DeveloperName, Status, ProcessType, VersionNumber FROM Flow ORDER BY DeveloperName, VersionNumber DESC',
+            'SELECT Id, MasterLabel, DeveloperName, Status, ProcessType, VersionNumber, LastModifiedDate ' +
+            'FROM Flow ORDER BY DeveloperName, VersionNumber DESC',
             maxRows
         );
 
@@ -549,7 +618,8 @@ public with sharing class RecommendationEngine {
 
                 Boolean isActive = status == 'Active';
                 String componentType = processType == 'Workflow' ? 'ProcessBuilder' : 'Flow';
-                if (isActive) {
+                Datetime lastModifiedDate = parseDatetime(ToolingApiService.getString(row, 'LastModifiedDate'));
+                if (!shouldFlagInactiveMetadata(isActive, status, lastModifiedDate)) {
                     continue;
                 }
                 recommendations.add(new Recommendation__c(
@@ -561,6 +631,7 @@ public with sharing class RecommendationEngine {
                         'Scope=Global; ComponentType=' + componentType + '; ComponentName=' + name +
                         '; ProcessType=' + processType +
                         '; ComponentStatus=' + status +
+                        '; LastModifiedDate=' + String.valueOf(lastModifiedDate) +
                         '; Source=ToolingAPI',
                     Status__c = 'Open',
                     LastEvaluatedOn__c = evaluatedAt
@@ -571,7 +642,8 @@ public with sharing class RecommendationEngine {
 
         try {
             List<SObject> fallbackRows = Database.query(
-                'SELECT Id, MasterLabel, DeveloperName, Status, ProcessType, VersionNumber FROM Flow LIMIT ' + maxRows
+                'SELECT Id, MasterLabel, DeveloperName, Status, ProcessType, VersionNumber, LastModifiedDate ' +
+                'FROM Flow LIMIT ' + maxRows
             );
             Map<String, SObject> bestFallbackByDefinition = new Map<String, SObject>();
             for (SObject row : fallbackRows) {
@@ -597,7 +669,8 @@ public with sharing class RecommendationEngine {
                 }
                 Boolean isActive = status == 'Active';
                 String componentType = processType == 'Workflow' ? 'ProcessBuilder' : 'Flow';
-                if (isActive) {
+                Datetime lastModifiedDate = (Datetime) row.get('LastModifiedDate');
+                if (!shouldFlagInactiveMetadata(isActive, status, lastModifiedDate)) {
                     continue;
                 }
                 recommendations.add(new Recommendation__c(
@@ -609,6 +682,7 @@ public with sharing class RecommendationEngine {
                         'Scope=Global; ComponentType=' + componentType + '; ComponentName=' + name +
                         '; ProcessType=' + processType +
                         '; ComponentStatus=' + status +
+                        '; LastModifiedDate=' + String.valueOf(lastModifiedDate) +
                         '; Source=SOQLFallback',
                     Status__c = 'Open',
                     LastEvaluatedOn__c = evaluatedAt
@@ -624,7 +698,7 @@ public with sharing class RecommendationEngine {
     private static List<Recommendation__c> buildGlobalWorkflowRuleRecommendations(Datetime evaluatedAt, Integer maxRows) {
         List<Recommendation__c> recommendations = new List<Recommendation__c>();
         ToolingApiService.ToolingQueryResult queryResult = ToolingApiService.query(
-            'SELECT Id, Name, Active, TableEnumOrId FROM WorkflowRule ORDER BY Name',
+            'SELECT Id, Name, Active, LastModifiedDate, TableEnumOrId FROM WorkflowRule ORDER BY Name',
             maxRows
         );
 
@@ -635,11 +709,12 @@ public with sharing class RecommendationEngine {
                 String objectName = ToolingApiService.getString(row, 'TableEnumOrId');
                 Boolean active = ToolingApiService.getBoolean(row, 'Active');
                 Boolean isActive = active == true;
+                Datetime lastModifiedDate = parseDatetime(ToolingApiService.getString(row, 'LastModifiedDate'));
                 if (String.isBlank(name)) {
                     name = id;
                 }
 
-                if (isActive) {
+                if (!shouldFlagInactiveMetadata(isActive, null, lastModifiedDate)) {
                     continue;
                 }
                 recommendations.add(new Recommendation__c(
@@ -651,6 +726,7 @@ public with sharing class RecommendationEngine {
                         'Scope=Global; ComponentType=WorkflowRule; ComponentName=' + name +
                         '; Object=' + objectName +
                         '; ComponentStatus=' + (isActive ? 'Active' : 'Inactive') +
+                        '; LastModifiedDate=' + String.valueOf(lastModifiedDate) +
                         '; Source=ToolingAPI',
                     Status__c = 'Open',
                     LastEvaluatedOn__c = evaluatedAt
@@ -661,11 +737,12 @@ public with sharing class RecommendationEngine {
 
         try {
             List<SObject> fallbackRows = Database.query(
-                'SELECT Id, Name, Active, TableEnumOrId FROM WorkflowRule LIMIT ' + maxRows
+                'SELECT Id, Name, Active, LastModifiedDate, TableEnumOrId FROM WorkflowRule LIMIT ' + maxRows
             );
             for (SObject row : fallbackRows) {
                 Boolean isActive = (Boolean) row.get('Active');
-                if (isActive) {
+                Datetime lastModifiedDate = (Datetime) row.get('LastModifiedDate');
+                if (!shouldFlagInactiveMetadata(isActive, null, lastModifiedDate)) {
                     continue;
                 }
                 recommendations.add(new Recommendation__c(
@@ -677,6 +754,7 @@ public with sharing class RecommendationEngine {
                         'Scope=Global; ComponentType=WorkflowRule; ComponentName=' + String.valueOf(row.get('Name')) +
                         '; Object=' + String.valueOf(row.get('TableEnumOrId')) +
                         '; ComponentStatus=' + (isActive ? 'Active' : 'Inactive') +
+                        '; LastModifiedDate=' + String.valueOf(lastModifiedDate) +
                         '; Source=SOQLFallback',
                     Status__c = 'Open',
                     LastEvaluatedOn__c = evaluatedAt
@@ -689,6 +767,7 @@ public with sharing class RecommendationEngine {
         return recommendations;
     }
 
+    @TestVisible
     private static List<Recommendation__c> buildGlobalApexCoverageRecommendations(
         Datetime evaluatedAt,
         Integer maxRows,
@@ -701,25 +780,22 @@ public with sharing class RecommendationEngine {
                 : runtime.apexCoverageThresholdPct;
 
         try {
-            List<ApexClass> classes = [SELECT Id, Name, Body FROM ApexClass LIMIT :maxRows];
+            List<ApexClass> classes = [SELECT Id, Name, Body, NamespacePrefix FROM ApexClass LIMIT :maxRows];
             Map<Id, Decimal> coverageByClassId = queryApexCoveragePct(new Map<Id, ApexClass>(classes).keySet());
 
             for (ApexClass classRow : classes) {
                 if (classRow.Name == null) {
                     continue;
                 }
-                if (classRow.Body != null && classRow.Body.toLowerCase().contains('@istest')) {
-                    continue;
-                }
-                if (!isActionableApexClass(classRow.Name, classRow.Body)) {
+                if (!isCoverageScopedApexClass(classRow.Name, classRow.Body, classRow.NamespacePrefix)) {
                     continue;
                 }
 
                 Boolean hasCoverageData = coverageByClassId.containsKey(classRow.Id);
                 Decimal coveragePct = hasCoverageData ? coverageByClassId.get(classRow.Id) : null;
-                String coverageText = hasCoverageData ? String.valueOf(coveragePct) : 'Unavailable';
+                String coverageText = hasCoverageData ? formatCoveragePct(coveragePct) : 'Unavailable';
                 String action = 'Investigate Dependencies';
-                Decimal confidence = 55;
+                Decimal confidence = 60;
                 Decimal risk = 70;
                 String coverageBand = 'Unknown';
                 if (hasCoverageData) {
@@ -730,15 +806,18 @@ public with sharing class RecommendationEngine {
                         coverageBand = 'Good';
                     } else if (coveragePct >= Math.max(0, coverageThreshold - 20)) {
                         action = 'Investigate Dependencies';
-                        confidence = 80;
-                        risk = 55;
+                        confidence = 84;
+                        risk = 78;
                         coverageBand = 'Borderline';
                     } else {
                         action = 'Investigate Dependencies';
-                        confidence = 95;
-                        risk = 95;
+                        confidence = 96;
+                        risk = 92;
                         coverageBand = 'Low';
                     }
+                } else {
+                    confidence = 75;
+                    risk = 80;
                 }
 
                 recommendations.add(new Recommendation__c(
@@ -751,7 +830,8 @@ public with sharing class RecommendationEngine {
                         '; CoveragePct=' + coverageText +
                         '; HasCoverageData=' + String.valueOf(hasCoverageData) +
                         '; CoverageBand=' + coverageBand +
-                        '; CoverageThreshold=' + coverageThreshold,
+                        '; CoverageThreshold=' + coverageThreshold +
+                        '; ScanScope=CoverageThreshold',
                     Status__c = 'Open',
                     LastEvaluatedOn__c = evaluatedAt
                 ));
@@ -763,11 +843,12 @@ public with sharing class RecommendationEngine {
         return recommendations;
     }
 
+    @TestVisible
     private static List<Recommendation__c> buildGlobalMetadataInventoryRecommendations(Datetime evaluatedAt) {
         List<Recommendation__c> recommendations = new List<Recommendation__c>();
         List<MetadataComponentInventory__c> rows = [
             SELECT ComponentKey__c, ComponentType__c, ApiName__c, DisplayName__c, ReferenceCount__c,
-                ActiveSubscriberCount__c, MonitoringEligible__c, SourceSummary__c
+                ActiveSubscriberCount__c, ActivePublisherCount__c, MonitoringEligible__c, SourceSummary__c
             FROM MetadataComponentInventory__c
             WHERE IsActive__c = true
             ORDER BY ReferenceCount__c ASC, ApiName__c ASC
@@ -781,6 +862,7 @@ public with sharing class RecommendationEngine {
 
             Integer referenceCount = row.ReferenceCount__c == null ? 0 : row.ReferenceCount__c.intValue();
             Integer activeSubscribers = row.ActiveSubscriberCount__c == null ? 0 : row.ActiveSubscriberCount__c.intValue();
+            Integer activePublishers = row.ActivePublisherCount__c == null ? 0 : row.ActivePublisherCount__c.intValue();
             String action = null;
             Decimal confidence = null;
             Decimal risk = null;
@@ -791,7 +873,7 @@ public with sharing class RecommendationEngine {
                     action = 'Deprecate';
                     confidence = 82;
                     risk = 25;
-                    reason = 'No references detected in scanned Apex or validation rules.';
+                    reason = 'No references detected in scanned Apex, flow, or validation-rule metadata.';
                 } else if (referenceCount <= 1) {
                     action = 'Investigate Dependencies';
                     confidence = 68;
@@ -799,13 +881,13 @@ public with sharing class RecommendationEngine {
                     reason = 'Only one lightweight reference was detected in the current scan scope.';
                 }
             } else if (row.ComponentType__c == 'Platform Event') {
-                if (activeSubscribers == 0) {
+                if (activeSubscribers == 0 && activePublishers == 0) {
                     action = 'Investigate Dependencies';
                     confidence = referenceCount == 0 ? 80 : 72;
                     risk = referenceCount == 0 ? 35 : 50;
                     reason = referenceCount == 0
-                        ? 'No Apex references or active subscribers were detected.'
-                        : 'References exist, but no active platform-event subscribers were detected.';
+                        ? 'No references, active publishers, or active subscribers were detected.'
+                        : 'References exist, but no active platform-event publishers or subscribers were detected.';
                 }
             }
 
@@ -824,6 +906,7 @@ public with sharing class RecommendationEngine {
                     '; ComponentApiName=' + row.ApiName__c +
                     '; ReferenceCount=' + String.valueOf(referenceCount) +
                     '; ActiveSubscriberCount=' + String.valueOf(activeSubscribers) +
+                    '; ActivePublisherCount=' + String.valueOf(activePublishers) +
                     '; MonitoringEligible=' + String.valueOf(row.MonitoringEligible__c) +
                     '; Reason=' + reason +
                     (String.isBlank(row.SourceSummary__c) ? '' : '; ' + row.SourceSummary__c),
@@ -835,8 +918,162 @@ public with sharing class RecommendationEngine {
         return recommendations;
     }
 
-    private static Boolean isActionableApexClass(String className, String body) {
+    private class TriggerRiskAssessment {
+        public Decimal confidence;
+        public Decimal risk;
+        public String reason;
+        public Integer activeTriggerCount;
+    }
+
+    private static Map<String, Integer> countActiveTriggersByObject(List<Map<String, Object>> rows) {
+        Map<String, Integer> counts = new Map<String, Integer>();
+        for (Map<String, Object> row : rows == null ? new List<Map<String, Object>>() : rows) {
+            if (ToolingApiService.getString(row, 'Status') != 'Active') {
+                continue;
+            }
+            String objectName = ToolingApiService.getString(row, 'TableEnumOrId');
+            if (String.isBlank(objectName)) {
+                continue;
+            }
+            counts.put(objectName, (counts.containsKey(objectName) ? counts.get(objectName) : 0) + 1);
+        }
+        return counts;
+    }
+
+    private static Map<String, Integer> countActiveTriggersByObject(List<ApexTrigger> rows) {
+        Map<String, Integer> counts = new Map<String, Integer>();
+        for (ApexTrigger row : rows == null ? new List<ApexTrigger>() : rows) {
+            if (String.valueOf(row.Status) != 'Active') {
+                continue;
+            }
+            String objectName = String.valueOf(row.TableEnumOrId);
+            if (String.isBlank(objectName)) {
+                continue;
+            }
+            counts.put(objectName, (counts.containsKey(objectName) ? counts.get(objectName) : 0) + 1);
+        }
+        return counts;
+    }
+
+    @TestVisible
+    private static TriggerRiskAssessment assessTriggerRisk(
+        String status,
+        String objectName,
+        Integer activeTriggerCount,
+        Boolean hasMultipleActiveTriggers,
+        Boolean lacksHandlerFramework,
+        Boolean hasMixedDmlSignal
+    ) {
+        TriggerRiskAssessment assessment = new TriggerRiskAssessment();
+        assessment.confidence = 80;
+        assessment.risk = 45;
+        assessment.activeTriggerCount = activeTriggerCount == null ? 0 : activeTriggerCount;
+        List<String> reasons = new List<String>();
+        if (status != 'Active') {
+            reasons.add('Inactive trigger');
+            assessment.risk = Math.max(assessment.risk, 45);
+            assessment.confidence = Math.max(assessment.confidence, 85);
+        }
+        if (hasMultipleActiveTriggers) {
+            reasons.add('Multiple active triggers on same object');
+            assessment.risk = Math.max(assessment.risk, 80);
+            assessment.confidence = Math.max(assessment.confidence, 90);
+        }
+        if (lacksHandlerFramework) {
+            reasons.add('No handler-framework signal');
+            assessment.risk = Math.max(assessment.risk, 65);
+        }
+        if (hasMixedDmlSignal) {
+            reasons.add('Mixed DML signal');
+            assessment.risk = Math.max(assessment.risk, 90);
+            assessment.confidence = Math.max(assessment.confidence, 88);
+        }
+        if (reasons.isEmpty()) {
+            reasons.add('Trigger review required');
+        }
+        assessment.reason = String.join(reasons, ', ');
+        return assessment;
+    }
+
+    @TestVisible
+    private static Boolean hasTriggerWithoutHandlerFramework(String body) {
+        String loweredBody = body == null ? '' : body.toLowerCase();
+        if (String.isBlank(loweredBody)) {
+            return false;
+        }
+        Boolean hasHandlerSignal =
+            loweredBody.contains('handler') ||
+            loweredBody.contains('.run(') ||
+            loweredBody.contains('.execute(') ||
+            loweredBody.contains('triggerhandler');
+        Boolean hasInlineBusinessLogic =
+            loweredBody.contains('trigger.new') ||
+            loweredBody.contains('trigger.old') ||
+            loweredBody.contains('insert ') ||
+            loweredBody.contains('update ') ||
+            loweredBody.contains('delete ');
+        return hasInlineBusinessLogic && !hasHandlerSignal;
+    }
+
+    @TestVisible
+    private static Boolean hasMixedDmlSignal(String body) {
+        String loweredBody = body == null ? '' : body.toLowerCase();
+        if (String.isBlank(loweredBody)) {
+            return false;
+        }
+        Boolean hasDml =
+            loweredBody.contains('insert ') ||
+            loweredBody.contains('update ') ||
+            loweredBody.contains('upsert ') ||
+            loweredBody.contains('delete ');
+        Boolean touchesSetupEntity =
+            loweredBody.contains('user') ||
+            loweredBody.contains('groupmember') ||
+            loweredBody.contains('permission') ||
+            loweredBody.contains('queue');
+        return hasDml && touchesSetupEntity;
+    }
+
+    @TestVisible
+    private static Boolean hasCrudOrFlsSignal(String body) {
+        String loweredBody = body == null ? '' : body.toLowerCase();
+        if (String.isBlank(loweredBody)) {
+            return false;
+        }
+        return
+            loweredBody.contains('with security_enforced') ||
+            loweredBody.contains('security.stripinaccessible') ||
+            loweredBody.contains('stripinaccessible(') ||
+            loweredBody.contains('.isaccessible(') ||
+            loweredBody.contains('.iscreateable(') ||
+            loweredBody.contains('.isupdateable(') ||
+            loweredBody.contains('.isdeletable(') ||
+            loweredBody.contains('sobjecttype.') ||
+            loweredBody.contains('describe().isaccessible') ||
+            loweredBody.contains('describe().iscreateable') ||
+            loweredBody.contains('describe().isupdateable');
+    }
+
+    @TestVisible
+    private static Boolean isFlowEntryApexClass(String body) {
+        String loweredBody = body == null ? '' : body.toLowerCase();
+        if (String.isBlank(loweredBody)) {
+            return false;
+        }
+        return loweredBody.contains('@invocablemethod') || loweredBody.contains('process.plugin');
+    }
+
+    @TestVisible
+    private static Boolean isActionableApexClass(String className, String body, String namespacePrefix) {
+        return isCoverageScopedApexClass(className, body, namespacePrefix);
+    }
+
+    @TestVisible
+    private static Boolean isCoverageScopedApexClass(String className, String body, String namespacePrefix) {
         if (String.isBlank(className)) {
+            return false;
+        }
+        if (!String.isBlank(namespacePrefix)) {
             return false;
         }
         if (className.endsWith('Test')) {
@@ -846,15 +1083,71 @@ public with sharing class RecommendationEngine {
             return false;
         }
         String loweredBody = body.toLowerCase();
-        // Skip interfaces and enums: they don't represent concrete executable classes for this recommendation.
-        if (Pattern.matches('(?s).*\\binterface\\b.*', loweredBody) || Pattern.matches('(?s).*\\benum\\b.*', loweredBody)) {
-            return false;
-        }
-        // Require at least one method signature to avoid flagging marker/placeholder artifacts.
-        if (!Pattern.matches('(?s).*\\b(public|private|protected|global)\\s+(static\\s+)?[A-Za-z0-9_<>,\\[\\]]+\\s+[A-Za-z0-9_]+\\s*\\(.*', body)) {
+        if (loweredBody.contains('@istest')) {
             return false;
         }
         return true;
+    }
+
+    @TestVisible
+    private static String extractSharingKeyword(String body) {
+        String loweredBody = body == null ? '' : body.toLowerCase();
+        if (loweredBody.contains('with sharing')) {
+            return 'with sharing';
+        }
+        if (loweredBody.contains('without sharing')) {
+            return 'without sharing';
+        }
+        return 'unknown';
+    }
+
+    @TestVisible
+    private static Boolean shouldFlagInactiveMetadata(Boolean isActive, String status, Datetime lastModifiedDate) {
+        if (isActive == true) {
+            return false;
+        }
+        if (!String.isBlank(status)) {
+            String loweredStatus = status.toLowerCase();
+            if (loweredStatus == 'obsolete' || loweredStatus == 'draft' || loweredStatus == 'invaliddraft') {
+                return true;
+            }
+        }
+        if (lastModifiedDate == null) {
+            return true;
+        }
+        return lastModifiedDate <= System.now().addDays(-180);
+    }
+
+    private static Set<String> collectTriggerReferencedApexClassNames(List<ApexClass> classes, Integer maxRows) {
+        Set<String> referencedClassNames = new Set<String>();
+        if (classes == null || classes.isEmpty()) {
+            return referencedClassNames;
+        }
+
+        List<String> triggerBodies = new List<String>();
+        try {
+            for (ApexTrigger triggerRow : [SELECT Body FROM ApexTrigger LIMIT :maxRows]) {
+                if (triggerRow.Body != null) {
+                    triggerBodies.add(triggerRow.Body.toLowerCase());
+                }
+            }
+        } catch (Exception ex) {
+            return referencedClassNames;
+        }
+
+        for (ApexClass classRow : classes) {
+            if (classRow == null || String.isBlank(classRow.Name)) {
+                continue;
+            }
+            String loweredClassName = classRow.Name.toLowerCase();
+            for (String body : triggerBodies) {
+                if (body.contains(loweredClassName)) {
+                    referencedClassNames.add(classRow.Name);
+                    break;
+                }
+            }
+        }
+        return referencedClassNames;
     }
 
     private static String buildMetadataRecommendationKey(String componentType, String apiName) {
@@ -908,6 +1201,36 @@ public with sharing class RecommendationEngine {
         return String.isBlank(keyPart) ? 'UNKNOWN' : keyPart.replaceAll('[^A-Za-z0-9_]', '_');
     }
 
+    private static Boolean isDeleteSafeCustomField(String objectApiName, String fieldApiName) {
+        if (String.isBlank(objectApiName) || String.isBlank(fieldApiName) || !fieldApiName.endsWith('__c')) {
+            return false;
+        }
+        try {
+            Map<String, Schema.SObjectType> globalDescribe = Schema.getGlobalDescribe();
+            Schema.SObjectType objectType = globalDescribe.get(objectApiName);
+            if (objectType == null) {
+                return false;
+            }
+            Schema.SObjectField fieldRef = objectType.getDescribe().fields.getMap().get(fieldApiName);
+            if (fieldRef == null) {
+                return false;
+            }
+            Schema.DescribeFieldResult describe = fieldRef.getDescribe();
+            if (describe == null) {
+                return false;
+            }
+            if (describe.isCalculated()) {
+                return false;
+            }
+            if (describe.getType() == Schema.DisplayType.Reference) {
+                return false;
+            }
+            return true;
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
     private static Decimal parseDecimal(Object value) {
         if (value == null) {
             return null;
@@ -916,6 +1239,28 @@ public with sharing class RecommendationEngine {
             return Decimal.valueOf(String.valueOf(value));
         } catch (Exception ex) {
             return null;
+        }
+    }
+
+    private static String formatCoveragePct(Decimal value) {
+        if (value == null) {
+            return 'Unknown';
+        }
+        return String.valueOf(value.setScale(0));
+    }
+
+    private static Datetime parseDatetime(String value) {
+        if (String.isBlank(value)) {
+            return null;
+        }
+        try {
+            return Datetime.valueOfGmt(value.replace('T', ' ').replace('Z', ''));
+        } catch (Exception ex) {
+            try {
+                return Datetime.valueOf(value);
+            } catch (Exception ignored) {
+                return null;
+            }
         }
     }
 
