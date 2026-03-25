@@ -205,7 +205,8 @@ jobs:
           while IFS= read -r test_class; do
             TEST_ARGS+=(--tests "$test_class")
           done < .ci/local-test-classes.txt
-          DEPLOY_JSON=$(sf project deploy start \
+          set +e
+          sf project deploy start \
             --target-org testorg \
             "${SOURCE_ARGS[@]}" \
             --ignore-conflicts \
@@ -213,8 +214,23 @@ jobs:
             --test-level RunSpecifiedTests \
             "${TEST_ARGS[@]}" \
             --wait 30 \
-            --json)
-          echo "$DEPLOY_JSON" > .ci/changed-apex-deploy.json
+            --json > .ci/changed-apex-deploy.json 2> .ci/changed-apex-deploy.stderr
+          deploy_exit=$?
+          set -e
+          if [ "$deploy_exit" -ne 0 ]; then
+            echo "Salesforce deploy validation failed."
+            if [ -s .ci/changed-apex-deploy.json ] && jq -e . .ci/changed-apex-deploy.json >/dev/null 2>&1; then
+              jq -r '
+                .message? // empty,
+                (.result.details.componentFailures[]? | "Component failure: \(.fileName // .fullName // "unknown") - \(.problem // .error // "unknown error")"),
+                (.result.details.runTestResult.failures[]? | "Test failure: \(.name).\(.methodName) - \(.message // "unknown error")"),
+                (.result.details.runTestResult.codeCoverageWarnings[]? | "Coverage warning: \(.name) - \(.message)")
+              ' .ci/changed-apex-deploy.json | sed '/^$/d' | head -n 20
+            elif [ -s .ci/changed-apex-deploy.stderr ]; then
+              sed -n '1,20p' .ci/changed-apex-deploy.stderr
+            fi
+            exit 1
+          fi
 
           MEMBER_NAMES=$(awk -F/ '
             /\.trigger$/ { sub(/\.trigger$/, "", $NF); print $NF }
