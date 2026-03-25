@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>EnableScheduledReports__c</fullName>
+    <defaultValue>false</defaultValue>
+    <description>Controls whether scheduled full scans should send an email report.</description>
+    <externalId>false</externalId>
+    <inlineHelpText>Enable this only when scheduled scans are enabled and you want an email summary after each scheduled full scan.</inlineHelpText>
+    <label>Enable Scheduled Reports</label>
+    <required>false</required>
+    <type>Checkbox</type>
+</CustomField>

@@ -8,6 +8,7 @@ public with sharing class MetadataComponentInventoryService {
         public Boolean isActive = true;
         public Integer referenceCount = 0;
         public Integer activeSubscriberCount = 0;
+        public Integer activePublisherCount = 0;
         public Boolean monitoringEligible = false;
         public String sourceSummary;
         public String toolingStatus;
@@ -16,7 +17,9 @@ public with sharing class MetadataComponentInventoryService {
     @TestVisible private static Map<String, ComponentRecord> testDiscoveredComponents;
     @TestVisible private static List<String> testApexBodies;
     @TestVisible private static List<String> testValidationFormulas;
+    @TestVisible private static List<String> testFlowDefinitions;
     @TestVisible private static Map<String, Integer> testPlatformEventActiveSubscribers;
+    @TestVisible private static Map<String, Integer> testPlatformEventActivePublishers;
 
     public static void refreshAll(Integer maxRows) {
         Clarity360AccessControlService access = Clarity360AccessControlService.get();
@@ -35,7 +38,9 @@ public with sharing class MetadataComponentInventoryService {
         enrichWithToolingMetadata(components, safeMaxRows);
         enrichWithApexReferences(components, safeMaxRows);
         enrichWithValidationRuleReferences(components, safeMaxRows);
+        enrichWithFlowReferences(components, safeMaxRows);
         enrichWithPlatformEventSubscribers(components, safeMaxRows);
+        enrichWithPlatformEventPublishers(components, safeMaxRows);
 
         Datetime scannedAt = System.now();
         List<MetadataComponentInventory__c> upserts = new List<MetadataComponentInventory__c>();
@@ -54,6 +59,7 @@ public with sharing class MetadataComponentInventoryService {
                 IsActive__c = component.isActive,
                 ReferenceCount__c = component.referenceCount,
                 ActiveSubscriberCount__c = component.activeSubscriberCount,
+                ActivePublisherCount__c = component.activePublisherCount,
                 MonitoringEligible__c = component.monitoringEligible,
                 LastScannedOn__c = scannedAt,
                 SourceSummary__c = buildSourceSummary(component)
@@ -190,26 +196,22 @@ public with sharing class MetadataComponentInventoryService {
     }
 
     private static void enrichWithApexReferences(Map<String, ComponentRecord> components, Integer maxRows) {
-        List<String> bodies = new List<String>();
-        if (Test.isRunningTest() && testApexBodies != null) {
-            bodies.addAll(testApexBodies);
-        } else {
-            for (ApexClass row : [SELECT Body FROM ApexClass LIMIT :maxRows]) {
-                if (row.Body != null) {
-                    bodies.add(row.Body);
-                }
-            }
-            for (ApexTrigger row : [SELECT Body FROM ApexTrigger LIMIT :maxRows]) {
-                if (row.Body != null) {
-                    bodies.add(row.Body);
-                }
-            }
-        }
-
-        for (String body : bodies) {
+        for (String body : getApexBodies(maxRows)) {
             String normalized = safeLower(body);
             for (ComponentRecord component : components.values()) {
                 if (containsToken(normalized, safeLower(component.apiName))) {
+                    component.referenceCount++;
+                }
+            }
+        }
+    }
+
+    private static void enrichWithFlowReferences(Map<String, ComponentRecord> components, Integer maxRows) {
+        for (String flowDefinitionText : getFlowDefinitionTexts(maxRows)) {
+            String normalized = safeLower(flowDefinitionText);
+            for (ComponentRecord component : components.values()) {
+                if (containsToken(normalized, safeLower(component.apiName)) ||
+                    containsToken(normalized, safeLower(extractDeveloperName(component.apiName)))) {
                     component.referenceCount++;
                 }
             }
@@ -288,6 +290,181 @@ public with sharing class MetadataComponentInventoryService {
         }
     }
 
+    private static void enrichWithPlatformEventPublishers(Map<String, ComponentRecord> components, Integer maxRows) {
+        Map<String, Integer> publisherCounts = new Map<String, Integer>();
+        if (Test.isRunningTest() && testPlatformEventActivePublishers != null) {
+            publisherCounts.putAll(testPlatformEventActivePublishers);
+        } else {
+            for (String body : getApexBodies(maxRows)) {
+                String normalized = safeLower(body);
+                if (!normalized.contains('eventbus.publish')) {
+                    continue;
+                }
+                for (ComponentRecord component : components.values()) {
+                    if (component.componentType != 'Platform Event') {
+                        continue;
+                    }
+                    if (!isPlatformEventPublishedFromApexBody(body, component)) {
+                        continue;
+                    }
+                    Integer current = publisherCounts.containsKey(component.apiName)
+                        ? publisherCounts.get(component.apiName)
+                        : 0;
+                    publisherCounts.put(component.apiName, current + 1);
+                }
+            }
+
+            for (String flowText : getFlowDefinitionTexts(maxRows)) {
+                String normalized = safeLower(flowText);
+                if (!normalized.contains('platformevent')) {
+                    continue;
+                }
+                for (ComponentRecord component : components.values()) {
+                    if (component.componentType != 'Platform Event') {
+                        continue;
+                    }
+                    if (!containsToken(normalized, safeLower(component.apiName)) &&
+                        !containsToken(normalized, safeLower(extractDeveloperName(component.apiName)))) {
+                        continue;
+                    }
+                    Integer current = publisherCounts.containsKey(component.apiName)
+                        ? publisherCounts.get(component.apiName)
+                        : 0;
+                    publisherCounts.put(component.apiName, current + 1);
+                }
+            }
+        }
+
+        for (ComponentRecord component : components.values()) {
+            if (component.componentType != 'Platform Event') {
+                continue;
+            }
+            component.activePublisherCount = publisherCounts.containsKey(component.apiName)
+                ? publisherCounts.get(component.apiName)
+                : 0;
+            component.referenceCount += component.activePublisherCount;
+        }
+    }
+
+    private static Boolean isPlatformEventPublishedFromApexBody(String body, ComponentRecord component) {
+        String normalizedBody = safeLower(body);
+        String normalizedApiName = safeLower(component == null ? null : component.apiName);
+        if (String.isBlank(normalizedBody) || String.isBlank(normalizedApiName)) {
+            return false;
+        }
+        if (!normalizedBody.contains('eventbus.publish')) {
+            return false;
+        }
+        if (containsToken(normalizedBody, normalizedApiName)) {
+            return true;
+        }
+
+        Set<String> aliases = extractPlatformEventAliases(body, component.apiName);
+        if (aliases.isEmpty()) {
+            return false;
+        }
+
+        for (String alias : aliases) {
+            if (String.isBlank(alias)) {
+                continue;
+            }
+            if (normalizedBody.contains('eventbus.publish(' + alias.toLowerCase() + ')') ||
+                normalizedBody.contains('eventbus.publish( ' + alias.toLowerCase() + ')') ||
+                normalizedBody.contains('eventbus.publish(' + alias.toLowerCase() + ',') ||
+                normalizedBody.contains('eventbus.publish( ' + alias.toLowerCase() + ',')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Set<String> extractPlatformEventAliases(String body, String apiName) {
+        Set<String> aliases = new Set<String>();
+        if (String.isBlank(body) || String.isBlank(apiName)) {
+            return aliases;
+        }
+
+        String escapedApiName = escapeRegexLiteral(apiName);
+        List<String> patterns = new List<String>{
+            '(?i)\\b' + escapedApiName + '\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\b',
+            '(?i)\\bList\\s*<\\s*' + escapedApiName + '\\s*>\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\b',
+            '(?i)\\bSet\\s*<\\s*' + escapedApiName + '\\s*>\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\b'
+        };
+
+        for (String regexPattern : patterns) {
+            Matcher matcher = Pattern.compile(regexPattern).matcher(body);
+            while (matcher.find()) {
+                aliases.add(matcher.group(1));
+            }
+        }
+        return aliases;
+    }
+
+    private static String escapeRegexLiteral(String value) {
+        if (String.isBlank(value)) {
+            return value;
+        }
+        return value
+            .replace('\\', '\\\\')
+            .replace('.', '\\.')
+            .replace('(', '\\(')
+            .replace(')', '\\)')
+            .replace('[', '\\[')
+            .replace(']', '\\]')
+            .replace('{', '\\{')
+            .replace('}', '\\}')
+            .replace('+', '\\+')
+            .replace('*', '\\*')
+            .replace('?', '\\?')
+            .replace('^', '\\^')
+            .replace('$', '\\$')
+            .replace('|', '\\|');
+    }
+
+    private static List<String> getApexBodies(Integer maxRows) {
+        List<String> bodies = new List<String>();
+        if (Test.isRunningTest() && testApexBodies != null) {
+            bodies.addAll(testApexBodies);
+            return bodies;
+        }
+
+        for (ApexClass row : [SELECT Body FROM ApexClass LIMIT :maxRows]) {
+            if (row.Body != null) {
+                bodies.add(row.Body);
+            }
+        }
+        for (ApexTrigger row : [SELECT Body FROM ApexTrigger LIMIT :maxRows]) {
+            if (row.Body != null) {
+                bodies.add(row.Body);
+            }
+        }
+        return bodies;
+    }
+
+    private static List<String> getFlowDefinitionTexts(Integer maxRows) {
+        List<String> flowTexts = new List<String>();
+        if (Test.isRunningTest() && testFlowDefinitions != null) {
+            flowTexts.addAll(testFlowDefinitions);
+            return flowTexts;
+        }
+
+        try {
+            ToolingApiService.ToolingQueryResult result = ToolingApiService.query(
+                'SELECT Id, DeveloperName, Status, ProcessType, Metadata FROM Flow ORDER BY LastModifiedDate DESC',
+                maxRows
+            );
+            if (result == null || result.success != true || result.records == null) {
+                return flowTexts;
+            }
+            for (Map<String, Object> row : result.records) {
+                flowTexts.add(JSON.serialize(row));
+            }
+        } catch (Exception ex) {
+            // Best effort only. Flows are optional enrichment.
+        }
+        return flowTexts;
+    }
+
     private static String buildSourceSummary(ComponentRecord component) {
         List<String> parts = new List<String>{
             'Discovery=Describe',
@@ -295,6 +472,7 @@ public with sharing class MetadataComponentInventoryService {
             'ApiName=' + component.apiName,
             'ReferenceCount=' + String.valueOf(component.referenceCount),
             'ActiveSubscriberCount=' + String.valueOf(component.activeSubscriberCount),
+            'ActivePublisherCount=' + String.valueOf(component.activePublisherCount),
             'MonitoringEligible=' + String.valueOf(component.monitoringEligible)
         };
         if (!String.isBlank(component.namespacePrefix)) {
@@ -319,6 +497,7 @@ public with sharing class MetadataComponentInventoryService {
             copy.isActive = original.isActive;
             copy.referenceCount = original.referenceCount;
             copy.activeSubscriberCount = original.activeSubscriberCount;
+            copy.activePublisherCount = original.activePublisherCount;
             copy.monitoringEligible = original.monitoringEligible;
             copy.sourceSummary = original.sourceSummary;
             copy.toolingStatus = original.toolingStatus;
@@ -401,8 +580,18 @@ public with sharing class MetadataComponentInventoryService {
     }
 
     @TestVisible
+    static void setTestFlowDefinitions(List<String> flowDefinitions) {
+        testFlowDefinitions = flowDefinitions;
+    }
+
+    @TestVisible
     static void setTestPlatformEventActiveSubscribers(Map<String, Integer> subscriberCounts) {
         testPlatformEventActiveSubscribers = subscriberCounts;
+    }
+
+    @TestVisible
+    static void setTestPlatformEventActivePublishers(Map<String, Integer> publisherCounts) {
+        testPlatformEventActivePublishers = publisherCounts;
     }
 
     @TestVisible
@@ -410,6 +599,8 @@ public with sharing class MetadataComponentInventoryService {
         testDiscoveredComponents = null;
         testApexBodies = null;
         testValidationFormulas = null;
+        testFlowDefinitions = null;
         testPlatformEventActiveSubscribers = null;
+        testPlatformEventActivePublishers = null;
     }
 }

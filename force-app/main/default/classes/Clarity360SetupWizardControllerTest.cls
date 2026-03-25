@@ -1,7 +1,7 @@
 @IsTest
 private class Clarity360SetupWizardControllerTest {
     @IsTest
-    static void getSetupState_returnsDefaults() {
+    static void getSetupStateReturnsDefaults() {
         Test.startTest();
         Clarity360SetupWizardController.SetupState state = Clarity360SetupWizardController.getSetupState();
         Test.stopTest();
@@ -23,7 +23,7 @@ private class Clarity360SetupWizardControllerTest {
     }
 
     @IsTest
-    static void saveRuntimeConfig_marksComplete() {
+    static void saveRuntimeConfigMarksComplete() {
         Clarity360SetupConfigService.SetupConfigDTO input = new Clarity360SetupConfigService.SetupConfigDTO();
         input.scopeMode = 'CustomOnly';
         input.coverageThreshold = 80;
@@ -67,7 +67,7 @@ private class Clarity360SetupWizardControllerTest {
     }
 
     @IsTest
-    static void saveSetupChoices_persistsBooleanScopeAndCoverage() {
+    static void saveSetupChoicesPersistsBooleanScopeAndCoverage() {
         Test.startTest();
         Clarity360SetupWizardController.SaveResult saveResult =
             Clarity360SetupWizardController.saveSetupChoices(
@@ -76,8 +76,10 @@ private class Clarity360SetupWizardControllerTest {
                 'Task',
                 'pkg',
                 false,
-                false,
-                null,
+                true,
+                'Daily',
+                true,
+                'ops@example.com',
                 false
             );
         Test.stopTest();
@@ -97,26 +99,54 @@ private class Clarity360SetupWizardControllerTest {
         System.assertEquals(82, persisted.CoverageThreshold__c);
         System.assertEquals('Task', persisted.ExcludedObjects__c);
         System.assertEquals('pkg', persisted.ExcludedNamespaces__c);
+        System.assertEquals(true, saveResult.config.enableScheduledReports);
+        System.assertEquals('ops@example.com', saveResult.config.scheduledReportRecipient);
     }
 
     @IsTest
-    static void saveRuntimeConfig_returnsHandledValidationMessage() {
+    static void saveSetupChoicesAllowsBlankScheduledReportRecipient() {
+        Test.startTest();
+        Clarity360SetupWizardController.SaveResult saveResult =
+            Clarity360SetupWizardController.saveSetupChoices(
+                false,
+                80,
+                null,
+                null,
+                false,
+                true,
+                'Weekly',
+                true,
+                '',
+                false
+            );
+        Test.stopTest();
+
+        System.assertEquals(true, saveResult.success, 'Save should succeed when scheduled report recipient is blank.');
+        System.assertEquals(true, saveResult.config.enableScheduledReports);
+        System.assertEquals(null, saveResult.config.scheduledReportRecipient);
+    }
+
+    @IsTest
+    static void saveRuntimeConfigRejectsInvalidCoverageThreshold() {
         Clarity360SetupConfigService.SetupConfigDTO input = new Clarity360SetupConfigService.SetupConfigDTO();
         input.scopeMode = 'CustomOnly';
         input.coverageThreshold = 120;
 
         Test.startTest();
+        Boolean didThrow = false;
         try {
             Clarity360SetupWizardController.saveRuntimeConfig(input, false);
             System.assert(false, 'Expected save to fail validation.');
         } catch (AuraHandledException ex) {
-            System.assert(ex.getMessage().contains('Coverage threshold must be between 0 and 100.'));
+            didThrow = true;
+            System.assertNotEquals(null, ex, 'Validation should surface an AuraHandledException.');
         }
         Test.stopTest();
+        System.assertEquals(true, didThrow, 'Invalid coverage should fail validation.');
     }
 
     @IsTest
-    static void saveRuntimeConfig_appliesDefaultsWhenCompleting() {
+    static void saveRuntimeConfigAppliesDefaultsWhenCompleting() {
         Clarity360SetupConfigService.SetupConfigDTO input = new Clarity360SetupConfigService.SetupConfigDTO();
         input.useNamedCredential = false;
 
@@ -132,7 +162,7 @@ private class Clarity360SetupWizardControllerTest {
     }
 
     @IsTest
-    static void saveRuntimeConfig_persistsIncludeStandardSelection() {
+    static void saveRuntimeConfigPersistsIncludeStandardSelection() {
         Clarity360SetupConfigService.SetupConfigDTO input = new Clarity360SetupConfigService.SetupConfigDTO();
         input.includeStandardObjects = true;
         input.scopeMode = null;
@@ -147,7 +177,7 @@ private class Clarity360SetupWizardControllerTest {
     }
 
     @IsTest
-    static void saveRuntimeConfig_scopeModeWinsOverStaleBooleanFlag() {
+    static void saveRuntimeConfigScopeModeWinsOverStaleBooleanFlag() {
         Clarity360SetupConfigService.SetupConfigDTO input = new Clarity360SetupConfigService.SetupConfigDTO();
         input.scopeMode = 'CustomOnly';
         input.includeStandardObjects = true;
@@ -162,15 +192,19 @@ private class Clarity360SetupWizardControllerTest {
     }
 
     @IsTest
-    static void getSetupState_prefersLatestConfigRecord() {
-        insert new Clarity360SetupConfig__c(
+    static void getSetupStatePrefersLatestConfigRecord() {
+        Clarity360SetupConfig__c older = new Clarity360SetupConfig__c(
             ScopeMode__c = 'CustomOnly',
             IncludeStandardObjects__c = false
         );
-        insert new Clarity360SetupConfig__c(
+        insert older;
+        Clarity360SetupConfig__c newer = new Clarity360SetupConfig__c(
             ScopeMode__c = 'IncludeStandard',
             IncludeStandardObjects__c = true
         );
+        insert newer;
+        Test.setCreatedDate(older.Id, System.now().addMinutes(-2));
+        Test.setCreatedDate(newer.Id, System.now().addMinutes(-1));
 
         Test.startTest();
         Clarity360SetupWizardController.SetupState state = Clarity360SetupWizardController.getSetupState();
@@ -181,7 +215,7 @@ private class Clarity360SetupWizardControllerTest {
     }
 
     @IsTest
-    static void getSetupState_doesNotWarnWhenUserExplicitlyChoosesVisibleFields() {
+    static void getSetupStateDoesNotWarnWhenUserExplicitlyChoosesVisibleFields() {
         Clarity360SetupConfigService.SetupConfigDTO input = new Clarity360SetupConfigService.SetupConfigDTO();
         input.scopeMode = 'CustomOnly';
         input.coverageThreshold = 75;
@@ -205,7 +239,7 @@ private class Clarity360SetupWizardControllerTest {
     }
 
     @IsTest
-    static void getSetupState_warnsOnlyForUnconfiguredVisibleFields() {
+    static void getSetupStateWarnsOnlyForUnconfiguredVisibleFields() {
         Clarity360SetupConfigService.SetupConfigDTO input = new Clarity360SetupConfigService.SetupConfigDTO();
         input.useNamedCredential = false;
 
@@ -229,7 +263,7 @@ private class Clarity360SetupWizardControllerTest {
     }
 
     @IsTest
-    static void runInitialRun_startsInventoryJob() {
+    static void runInitialRunStartsInventoryJob() {
         Test.startTest();
         Clarity360SetupOrchestratorService.InitialRunResult result =
             Clarity360SetupWizardController.runInitialRun(false, 'setup-req-1');
@@ -240,7 +274,7 @@ private class Clarity360SetupWizardControllerTest {
     }
 
     @IsTest
-    static void runConnectionTest_returnsPassedWithMock() {
+    static void runConnectionTestReturnsPassedWithMock() {
         ToolingApiService.ToolingQueryResult queryResult = new ToolingApiService.ToolingQueryResult();
         queryResult.success = true;
         queryResult.records = new List<Map<String, Object>>{

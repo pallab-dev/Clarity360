@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="Clarity360 Apex Rules"
+    xmlns="http://pmd.sourceforge.net/ruleset/2.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://pmd.sourceforge.net/ruleset/2.0.0 https://pmd.github.io/pmd-6.55.0/ruleset_xml_schema.xsd">
+    <description>Project-level Apex PMD rules for Clarity360.</description>
+
+    <rule ref="category/apex/bestpractices.xml"/>
+    <rule ref="category/apex/codestyle.xml">
+        <exclude name="ClassNamingConventions"/>
+    </rule>
+    <rule ref="category/apex/design.xml">
+        <exclude name="ExcessiveClassLength"/>
+        <exclude name="ExcessivePublicCount"/>
+    </rule>
+    <rule ref="category/apex/errorprone.xml"/>
+    <rule ref="category/apex/performance.xml"/>
+    <rule ref="category/apex/security.xml"/>
+</ruleset>

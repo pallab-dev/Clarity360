@@ -3,11 +3,15 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
+    "lint:apex": "sf scanner run --engine pmd --target \"force-app/main/default/classes\" --target \"force-app/main/default/triggers\" --pmdconfig \"config/pmd-ruleset.xml\"",
+    "lint:apex:appexchange": "sf scanner run --engine pmd --target \"force-app/main/default/classes\" --target \"force-app/main/default/triggers\" --category \"AppExchange\"",
     "lint": "eslint ./force-app/**/*.js",
-    "lint:fix": "eslint ./force-app/**/*.js --fix"
+    "lint:fix": "eslint ./force-app/**/*.js --fix",
+    "test:unit:lwc": "sfdx-lwc-jest -- --runInBand"
   },
   "devDependencies": {
     "@salesforce/eslint-config-lwc": "latest",
+    "@salesforce/sfdx-lwc-jest": "^7.1.2",
     "eslint": "latest"
   }
 }

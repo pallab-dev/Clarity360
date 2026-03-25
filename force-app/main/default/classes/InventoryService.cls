@@ -1,5 +1,14 @@
 public with sharing class InventoryService {
     private static final Decimal STORAGE_PRESSURE_PCT = 95;
+    private static final Integer MAX_FIELDS_PER_OBJECT = 200;
+    private static final Set<String> INTERNAL_APPLICATION_OBJECTS = new Set<String>{
+        'clarity360setupconfig__c',
+        'fieldinventory__c',
+        'metadatacomponentinventory__c',
+        'recommendation__c',
+        'scanjob__c',
+        'usagesignal__c'
+    };
     private static final Set<String> EXCLUDED_METADATA_OBJECTS = new Set<String>{
         'apexclass',
         'apexcomponent',
@@ -11,6 +20,11 @@ public with sharing class InventoryService {
         'flow',
         'validationrule',
         'workflowrule'
+    };
+    private static final Set<Schema.DisplayType> EXCLUDED_FIELD_TYPES = new Set<Schema.DisplayType>{
+        Schema.DisplayType.Address,
+        Schema.DisplayType.Base64,
+        Schema.DisplayType.Location
     };
 
     public class RefreshResult {
@@ -155,9 +169,13 @@ public with sharing class InventoryService {
         Integer includedFieldsForObject = 0;
 
         for (String fieldName : fieldNames) {
-            Schema.DescribeFieldResult fieldDescribe = fields.get(fieldName).getDescribe();
             // Guardrail for low-storage orgs: cap inventory volume per object.
-            if (includedFieldsForObject >= 200) {
+            if (includedFieldsForObject >= MAX_FIELDS_PER_OBJECT) {
+                continue;
+            }
+
+            Schema.DescribeFieldResult fieldDescribe = fields.get(fieldName).getDescribe();
+            if (!isFieldInScope(sObjectDescribe, fieldDescribe)) {
                 continue;
             }
 
@@ -166,6 +184,10 @@ public with sharing class InventoryService {
                 FieldKey__c = fieldKey,
                 ObjectApiName__c = objectName,
                 FieldApiName__c = fieldName,
+                DataType__c = String.valueOf(fieldDescribe.getType()),
+                IsCustomField__c = fieldDescribe.isCustom(),
+                IncludedInScope__c = true,
+                NamespacePrefix__c = extractNamespacePrefix(fieldName),
                 IsActive__c = true,
                 LastScannedOn__c = scannedAt
             ));
@@ -364,14 +386,24 @@ public with sharing class InventoryService {
         if (isExcludedMetadataObject(objectApiName)) {
             return false;
         }
+        Clarity360Settings.RuntimeConfig runtime = Clarity360Settings.getRuntime();
+        if (isCustomObject != true && (runtime == null || runtime.includeStandardObjects != true)) {
+            return false;
+        }
+        Schema.DescribeSObjectResult describe = getDescribe(objectApiName);
+        if (describe == null) {
+            return false;
+        }
+        if (isSpecialUseObject(describe)) {
+            return false;
+        }
         if (isCustomObject == true) {
             return true;
         }
-        Schema.DescribeSObjectResult describe = getDescribe(objectApiName);
-        if (describe == null || describe.isCustom()) {
+        if (describe.isCustom()) {
             return false;
         }
-        return hasAnyCustomField(describe);
+        return hasAnyEligibleField(describe);
     }
 
     public static Boolean isExcludedMetadataObject(String objectApiName) {
@@ -379,7 +411,13 @@ public with sharing class InventoryService {
             return true;
         }
         String normalized = objectApiName.trim().toLowerCase();
+        if (INTERNAL_APPLICATION_OBJECTS.contains(normalized)) {
+            return true;
+        }
         if (EXCLUDED_METADATA_OBJECTS.contains(normalized)) {
+            return true;
+        }
+        if (normalized.endsWith('__mdt')) {
             return true;
         }
         return normalized.startsWith('apex');
@@ -404,6 +442,105 @@ public with sharing class InventoryService {
             }
         }
         return false;
+    }
+
+    @TestVisible
+    private static Boolean isFieldInScope(String objectApiName, String fieldApiName) {
+        Schema.DescribeSObjectResult describe = getDescribe(objectApiName);
+        if (describe == null || String.isBlank(fieldApiName)) {
+            return false;
+        }
+        Schema.SObjectField fieldRef = describe.fields.getMap().get(fieldApiName);
+        return fieldRef == null ? false : isFieldInScope(describe, fieldRef.getDescribe());
+    }
+
+    private static Boolean hasAnyEligibleField(Schema.DescribeSObjectResult sObjectDescribe) {
+        if (sObjectDescribe == null) {
+            return false;
+        }
+        if (isExcludedMetadataObject(sObjectDescribe.getName()) || isSpecialUseObject(sObjectDescribe)) {
+            return false;
+        }
+        Map<String, Schema.SObjectField> fieldsByName = sObjectDescribe.fields.getMap();
+        for (String fieldName : fieldsByName.keySet()) {
+            if (!isEligibleCustomFieldApi(fieldName)) {
+                continue;
+            }
+            if (isManagedComponent(fieldName)) {
+                continue;
+            }
+            if (isFieldInScope(sObjectDescribe, fieldsByName.get(fieldName).getDescribe())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static Boolean isFieldInScope(
+        Schema.DescribeSObjectResult objectDescribe,
+        Schema.DescribeFieldResult fieldDescribe
+    ) {
+        if (objectDescribe == null || fieldDescribe == null) {
+            return false;
+        }
+        if (isExcludedMetadataObject(objectDescribe.getName())) {
+            return false;
+        }
+        if (fieldDescribe.isDeprecatedAndHidden()) {
+            return false;
+        }
+        if (!fieldDescribe.isAccessible()) {
+            return false;
+        }
+        if (!isEligibleCustomFieldApi(fieldDescribe.getName())) {
+            return false;
+        }
+        if (isManagedComponent(fieldDescribe.getName())) {
+            return false;
+        }
+        if (fieldDescribe.getType() != null && EXCLUDED_FIELD_TYPES.contains(fieldDescribe.getType())) {
+            return false;
+        }
+        if (!fieldDescribe.isCustom()) {
+            return false;
+        }
+        if (isCompoundComponentField(fieldDescribe)) {
+            return false;
+        }
+        if (isSpecialUseObject(objectDescribe)) {
+            return false;
+        }
+        return true;
+    }
+
+    private static Boolean isEligibleCustomFieldApi(String fieldApiName) {
+        if (String.isBlank(fieldApiName)) {
+            return false;
+        }
+        return fieldApiName.trim().toLowerCase().endsWith('__c');
+    }
+
+    private static Boolean isCompoundComponentField(Schema.DescribeFieldResult fieldDescribe) {
+        if (fieldDescribe == null) {
+            return false;
+        }
+        try {
+            return !String.isBlank(fieldDescribe.getCompoundFieldName());
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
+    private static Boolean isSpecialUseObject(Schema.DescribeSObjectResult sObjectDescribe) {
+        if (sObjectDescribe == null) {
+            return true;
+        }
+        String objectName = sObjectDescribe.getName();
+        String normalized = objectName == null ? '' : objectName.toLowerCase();
+        if (normalized.endsWith('__b') || normalized.endsWith('__x') || normalized.endsWith('__e')) {
+            return true;
+        }
+        return sObjectDescribe.isCustomSetting();
     }
 
     private class CustomFieldFirstComparator implements Comparator<String> {
@@ -455,6 +592,10 @@ public with sharing class InventoryService {
         }
         List<String> parts = objectApiName.split('__');
         return parts.size() >= 3 ? parts[0] : null;
+    }
+
+    private static Boolean isManagedComponent(String apiName) {
+        return !String.isBlank(extractNamespacePrefix(apiName));
     }
 
 }

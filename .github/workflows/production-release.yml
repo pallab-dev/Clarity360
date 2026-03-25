@@ -42,7 +42,7 @@ jobs:
             const runsResponse = await github.rest.actions.listWorkflowRuns({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              workflow_id: 'production-validation.yml',
+              workflow_id: 'production.yml',
               event: 'pull_request',
               per_page: 100,
             });

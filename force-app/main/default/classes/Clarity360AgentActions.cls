@@ -1,5 +1,5 @@
 /**
- * Shared read-only action logic for Agentforce Admin Copilot.
+ * @description Shared read-only action logic for Agentforce Admin Copilot.
  *
  * Note: Apex allows only one @InvocableMethod per class.
  * Thin wrapper classes expose each method as a separate Agentforce custom action.
@@ -14,6 +14,9 @@ public with sharing class Clarity360AgentActions {
         'Dismissed'
     };
 
+    /**
+     * @description Request envelope for the explain recommendation action.
+     */
     public class ExplainRecommendationRequest {
         @InvocableVariable(label='Recommendation Id' description='Recommendation__c record Id to explain.')
         public Id recommendationId;
@@ -22,6 +25,9 @@ public with sharing class Clarity360AgentActions {
         public String fieldKey;
     }
 
+    /**
+     * @description Request envelope for the high-risk recommendations action.
+     */
     public class GetHighRiskRecommendationsRequest {
         @InvocableVariable(label='Minimum Risk Score' description='Minimum recommendation risk score (0-100).')
         public Decimal minRiskScore;
@@ -33,11 +39,17 @@ public with sharing class Clarity360AgentActions {
         public String statusFilter;
     }
 
+    /**
+     * @description Request envelope for the recent scan summary action.
+     */
     public class GetRecentScanSummaryRequest {
         @InvocableVariable(label='Lookback Days' description='Only include data from the last N days (1-365).')
         public Integer lookbackDays;
     }
 
+    /**
+     * @description Unified response envelope returned by agent actions.
+     */
     public class AgentActionResult {
         @InvocableVariable(label='Action')
         public String action;
@@ -64,6 +76,11 @@ public with sharing class Clarity360AgentActions {
         public String fieldKey;
     }
 
+    /**
+     * @description Returns a human-readable explanation for a recommendation.
+     * @param requests The recommendations to explain.
+     * @return The action result envelopes for the supplied requests.
+     */
     public static List<AgentActionResult> explainRecommendation(List<ExplainRecommendationRequest> requests) {
         Clarity360AccessControlService access = Clarity360AccessControlService.get();
         access.assertReadable(Recommendation__c.SObjectType, 'ExplainRecommendation');
@@ -102,6 +119,11 @@ public with sharing class Clarity360AgentActions {
         return results;
     }
 
+    /**
+     * @description Returns the highest-risk recommendations that match the supplied filters.
+     * @param requests The high-risk recommendation requests.
+     * @return The action result envelopes for the supplied requests.
+     */
     public static List<AgentActionResult> getHighRiskRecommendations(List<GetHighRiskRecommendationsRequest> requests) {
         Clarity360AccessControlService access = Clarity360AccessControlService.get();
         access.assertReadable(Recommendation__c.SObjectType, 'GetHighRiskRecommendations');
@@ -162,6 +184,11 @@ public with sharing class Clarity360AgentActions {
         return results;
     }
 
+    /**
+     * @description Returns a summary of the most recent scan activity.
+     * @param requests The recent-scan summary requests.
+     * @return The action result envelopes for the supplied requests.
+     */
     public static List<AgentActionResult> getRecentScanSummary(List<GetRecentScanSummaryRequest> requests) {
         Clarity360AccessControlService access = Clarity360AccessControlService.get();
         access.assertReadable(ScanJob__c.SObjectType, 'GetRecentScanSummary');

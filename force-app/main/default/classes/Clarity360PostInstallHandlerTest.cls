@@ -1,7 +1,7 @@
 @IsTest
 private class Clarity360PostInstallHandlerTest {
     @IsTest
-    static void ensureSetupConfigExists_createsDefaultRow() {
+    static void ensureSetupConfigExistsCreatesDefaultRow() {
         delete [SELECT Id FROM Clarity360SetupConfig__c];
 
         Test.startTest();

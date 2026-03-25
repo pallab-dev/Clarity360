@@ -34,6 +34,7 @@
     </types>
     <types>
         <members>FieldInventory__c</members>
+        <members>Clarity360SetupConfig__c</members>
         <members>MetadataComponentInventory__c</members>
         <members>Recommendation__c</members>
         <members>ScanJob__c</members>
