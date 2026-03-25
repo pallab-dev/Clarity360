@@ -95,6 +95,7 @@ public with sharing class ScanOrchestrator {
         }
     }
 
+    @TestVisible
     private static String reportToken(String reportMode, String reportRecipient) {
         if (String.isBlank(reportMode)) {
             return '';
@@ -253,10 +254,12 @@ public with sharing class ScanOrchestrator {
         }
     }
 
+    @TestVisible
     private static Boolean isStorageLimitError(Exception ex) {
         return ex != null && ex.getMessage() != null && ex.getMessage().contains('STORAGE_LIMIT_EXCEEDED');
     }
 
+    @TestVisible
     private static void purgeGeneratedData() {
         // These datasets are fully derived and can be rebuilt by rerunning scans.
         deleteChunk('UsageSignal__c', 10000);
@@ -264,6 +267,7 @@ public with sharing class ScanOrchestrator {
         deleteOldScanJobs(1000);
     }
 
+    @TestVisible
     private static void deleteChunk(String objectApiName, Integer sizeLimit) {
         if (!Pattern.matches('^[A-Za-z][A-Za-z0-9_]*$', objectApiName)) {
             return;
@@ -274,6 +278,7 @@ public with sharing class ScanOrchestrator {
         }
     }
 
+    @TestVisible
     private static void deleteOldScanJobs(Integer sizeLimit) {
         List<ScanJob__c> jobs = [
             SELECT Id
@@ -286,6 +291,7 @@ public with sharing class ScanOrchestrator {
         }
     }
 
+    @TestVisible
     private static String requestToken(String requestId) {
         return String.isBlank(requestId) ? '' : '; requestId=' + requestId;
     }

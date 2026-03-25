@@ -127,6 +127,7 @@ public with sharing class InventoryRefreshQueueable implements Queueable {
         }
     }
 
+    @TestVisible
     private void updateProgress(Integer totalObjects, Integer scanned, Integer upserted, Integer inactivated) {
         if (scanJobId == null) {
             return;
@@ -160,6 +161,7 @@ public with sharing class InventoryRefreshQueueable implements Queueable {
         Clarity360ScanReportService.notifyIfNeeded(scanJobId);
     }
 
+    @TestVisible
     private void launchUsageBatchOrComplete(Integer scanned, Integer upserted, Integer inactivated) {
         if (scanJobId == null) {
             return;
@@ -178,6 +180,7 @@ public with sharing class InventoryRefreshQueueable implements Queueable {
         Database.executeBatch(new UsageScanBatch(usageSampleLimit, usageMaxObjects, scanJobId), 1);
     }
 
+    @TestVisible
     private void markFailed(Exception ex) {
         if (scanJobId == null) {
             return;

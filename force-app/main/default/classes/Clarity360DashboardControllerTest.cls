@@ -237,6 +237,129 @@ private class Clarity360DashboardControllerTest {
     }
 
     @IsTest
+    static void getGlobalComponentsBuildsRowsFromToolingResultsAndCoverageFallback() {
+        ensureSetupComplete();
+
+        List<ApexClass> scopedClasses = [
+            SELECT Id, Name, Body, NamespacePrefix
+            FROM ApexClass
+            WHERE NamespacePrefix = null
+            LIMIT 20
+        ];
+        List<ApexClass> eligibleClasses = new List<ApexClass>();
+        for (ApexClass row : scopedClasses) {
+            if (Clarity360DashboardController.isCoverageScopedApexClassForInventory(row)) {
+                eligibleClasses.add(row);
+            }
+            if (eligibleClasses.size() == 2) {
+                break;
+            }
+        }
+        System.assertEquals(2, eligibleClasses.size(), 'Expected at least two eligible Apex classes.');
+
+        ToolingApiService.ToolingQueryResult triggerResult = new ToolingApiService.ToolingQueryResult();
+
+        ToolingApiService.ToolingQueryResult validationResult = new ToolingApiService.ToolingQueryResult();
+        validationResult.records.add(new Map<String, Object>{
+            'Id' => '03d000000000099',
+            'ValidationName' => null,
+            'Active' => false,
+            'EntityDefinition' => new Map<String, Object>{ 'QualifiedApiName' => 'Account' }
+        });
+
+        ToolingApiService.ToolingQueryResult flowResult = new ToolingApiService.ToolingQueryResult();
+        flowResult.records.add(new Map<String, Object>{
+            'Id' => '301000000000010',
+            'MasterLabel' => 'Customer Intake',
+            'Status' => 'Draft',
+            'ProcessType' => 'Flow',
+            'VersionNumber' => 1
+        });
+        flowResult.records.add(new Map<String, Object>{
+            'Id' => '301000000000011',
+            'MasterLabel' => 'Customer Intake',
+            'Status' => 'Active',
+            'ProcessType' => 'Flow',
+            'VersionNumber' => 2
+        });
+        flowResult.records.add(new Map<String, Object>{
+            'Id' => '301000000000012',
+            'MasterLabel' => null,
+            'Status' => 'Draft',
+            'ProcessType' => 'Workflow',
+            'VersionNumber' => 5
+        });
+
+        ToolingApiService.ToolingQueryResult workflowResult = new ToolingApiService.ToolingQueryResult();
+        workflowResult.records.add(new Map<String, Object>{
+            'Id' => '04a000000000111',
+            'Name' => 'LegacyWorkflow',
+            'TableEnumOrId' => 'Account',
+            'Metadata' => new Map<String, Object>{ 'active' => true }
+        });
+
+        ToolingApiService.ToolingQueryResult coverageAggregate = new ToolingApiService.ToolingQueryResult();
+        coverageAggregate.records.add(new Map<String, Object>{
+            'ApexClassOrTriggerId' => String.valueOf(eligibleClasses[0].Id),
+            'NumLinesCovered' => 8,
+            'NumLinesUncovered' => 2
+        });
+        coverageAggregate.records.add(new Map<String, Object>{
+            'ApexClassOrTriggerId' => String.valueOf(eligibleClasses[1].Id),
+            'NumLinesCovered' => 6,
+            'NumLinesUncovered' => 4
+        });
+        coverageAggregate.records.add(new Map<String, Object>{
+            'ApexClassOrTriggerId' => 'not-an-id',
+            'NumLinesCovered' => 2,
+            'NumLinesUncovered' => 1
+        });
+
+        ToolingApiService.ToolingQueryResult coverageDetail = new ToolingApiService.ToolingQueryResult();
+        coverageDetail.records.add(new Map<String, Object>{
+            'ApexClassOrTriggerId' => String.valueOf(eligibleClasses[1].Id),
+            'NumLinesCovered' => 9,
+            'NumLinesUncovered' => 1
+        });
+
+        ToolingApiService.setTestQueryResults(new List<ToolingApiService.ToolingQueryResult>{
+            triggerResult,
+            validationResult,
+            flowResult,
+            workflowResult,
+            coverageAggregate,
+            coverageDetail
+        });
+
+        Test.startTest();
+        List<Clarity360DashboardController.GlobalComponentRow> rows =
+            Clarity360DashboardController.getGlobalComponents(50);
+        Test.stopTest();
+        ToolingApiService.clearTestOverrides();
+
+        Map<String, Clarity360DashboardController.GlobalComponentRow> byKey =
+            new Map<String, Clarity360DashboardController.GlobalComponentRow>();
+        for (Clarity360DashboardController.GlobalComponentRow row : rows) {
+            byKey.put(row.fieldKey, row);
+        }
+
+        System.assertNotEquals(null, byKey.get('GLOBAL.APEXCLASS.' + eligibleClasses[0].Name));
+        System.assertNotEquals(null, byKey.get('GLOBAL.APEXCLASS.' + eligibleClasses[1].Name));
+        System.assert(
+            byKey.get('GLOBAL.APEXCLASS.' + eligibleClasses[0].Name).status == 'Coverage Pending' ||
+            byKey.get('GLOBAL.APEXCLASS.' + eligibleClasses[0].Name).status.endsWith('%')
+        );
+        System.assert(
+            byKey.get('GLOBAL.APEXCLASS.' + eligibleClasses[1].Name).status == 'Coverage Pending' ||
+            byKey.get('GLOBAL.APEXCLASS.' + eligibleClasses[1].Name).status.endsWith('%')
+        );
+        System.assert(
+            byKey.get('GLOBAL.APEXCLASS.' + eligibleClasses[1].Name).detail == 'Apex coverage available' ||
+            byKey.get('GLOBAL.APEXCLASS.' + eligibleClasses[1].Name).detail.contains('Run Usage Scan')
+        );
+    }
+
+    @IsTest
     static void actionableApexInventoryFilterMatchesGovernanceIntent() {
         ApexClass flowEntryClass = new ApexClass(
             Name = 'FlowEntryService',
@@ -286,6 +409,47 @@ private class Clarity360DashboardControllerTest {
             'Inactive',
             Clarity360DashboardController.deriveWorkflowRuleStatus(new Map<String, Object>()),
             'Workflow rules without active metadata should collapse to Inactive.'
+        );
+        System.assertEquals(
+            'Active',
+            Clarity360DashboardController.deriveWorkflowRuleStatus(new Map<String, Object>{
+                'Metadata' => new Map<String, Object>{ 'Active' => true }
+            })
+        );
+    }
+
+    @IsTest
+    static void dashboardHelpersHandleInvalidInputsAndCoverageScopeGuards() {
+        ensureSetupComplete();
+
+        Test.startTest();
+        List<UsageSignal__c> invalidSignals = Clarity360DashboardController.getSignalsForField('not a safe key');
+        Clarity360DashboardController.FieldDetailEvidence invalidDetail =
+            Clarity360DashboardController.getFieldDetailEvidence('bad key');
+        Test.stopTest();
+
+        System.assertEquals(0, invalidSignals.size());
+        System.assertEquals(null, invalidDetail.isOnLayout);
+        System.assertEquals(0, invalidDetail.layoutNames.size());
+        System.assertEquals('0%', Clarity360DashboardController.formatCoverageLabel(null));
+        System.assertEquals('not-a-number', Clarity360DashboardController.formatCoverageLabel('not-a-number'));
+        System.assertEquals(
+            false,
+            Clarity360DashboardController.isCoverageScopedApexClassForInventory(
+                new ApexClass(Name = 'ManagedServiceTest', Body = 'public class ManagedServiceTest {}')
+            )
+        );
+        System.assertEquals(
+            false,
+            Clarity360DashboardController.isCoverageScopedApexClassForInventory(
+                new ApexClass(Name = 'CoverageTest', Body = '@IsTest private class CoverageTest {}')
+            )
+        );
+        System.assertEquals(
+            false,
+            Clarity360DashboardController.isCoverageScopedApexClassForInventory(
+                new ApexClass(Name = 'NoBodyService')
+            )
         );
     }
 

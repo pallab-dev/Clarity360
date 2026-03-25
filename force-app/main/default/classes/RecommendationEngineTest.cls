@@ -30,6 +30,19 @@ private class RecommendationEngineTest {
         };
     }
 
+    private static ToolingApiService.ToolingQueryResult buildCoverageQueryResult(Map<Id, List<Decimal>> coverageById) {
+        ToolingApiService.ToolingQueryResult result = new ToolingApiService.ToolingQueryResult();
+        for (Id classId : coverageById.keySet()) {
+            List<Decimal> coverage = coverageById.get(classId);
+            result.records.add(new Map<String, Object>{
+                'ApexClassOrTriggerId' => String.valueOf(classId),
+                'NumLinesCovered' => coverage[0],
+                'NumLinesUncovered' => coverage[1]
+            });
+        }
+        return result;
+    }
+
     @IsTest
     static void buildFromSignalsGeneratesExpectedAction() {
         ensureRuntimeSetup();
@@ -201,6 +214,40 @@ private class RecommendationEngineTest {
     }
 
     @IsTest
+    static void buildFromSignalsInvestigatesWhenOnlyInactiveDependenciesRemain() {
+        ensureRuntimeSetup();
+        FieldInventory__c inventory = new FieldInventory__c(
+            FieldKey__c = 'Account.LegacyFlag__c',
+            ObjectApiName__c = 'Account',
+            FieldApiName__c = 'LegacyFlag__c'
+        );
+        insert inventory;
+
+        UsageSignal__c signal = new UsageSignal__c(
+            FieldKey__c = inventory.FieldKey__c,
+            FieldInventory__c = inventory.Id,
+            SampleSize__c = 120,
+            NonNullCount__c = 0,
+            NullRatePct__c = 100,
+            IsOnLayout__c = false,
+            EvidenceSummary__c =
+                'Sampled=120; NonNull=0; HasData=false; ObjectRecordCount=500; MeetsMinRecordThreshold=true; ' +
+                'ActiveTriggerRefs=0; InactiveTriggerRefs=1; ' +
+                'ActiveValidationRuleRefs=0; InactiveValidationRuleRefs=1; ActiveFlowRefs=0; InactiveFlowRefs=1; ' +
+                'ApexClassRefs=0; AvgApexCoveragePct=95'
+        );
+
+        List<Recommendation__c> recommendations = RecommendationEngine.buildFromSignals(
+            new List<UsageSignal__c>{ signal },
+            new Map<Id, FieldInventory__c>{ inventory.Id => inventory }
+        );
+
+        System.assertEquals(1, recommendations.size());
+        System.assertEquals('Investigate Dependencies', recommendations[0].Action__c);
+        System.assert(recommendations[0].EvidenceSummary__c.contains('InactiveDependencyCount=3'));
+    }
+
+    @IsTest
     static void rebuildAllRecommendationsGeneratesMetadataInventoryRecommendations() {
         ensureRuntimeSetup();
 
@@ -353,6 +400,99 @@ private class RecommendationEngineTest {
         System.assertEquals(true, RecommendationEngine.shouldFlagInactiveMetadata(false, 'Draft', System.now().addDays(-5)));
         System.assertEquals(true, RecommendationEngine.shouldFlagInactiveMetadata(false, null, System.now().addDays(-200)));
         System.assertEquals(false, RecommendationEngine.shouldFlagInactiveMetadata(false, null, System.now().addDays(-20)));
+    }
+
+    @IsTest
+    static void rebuildAllRecommendationsFallsBackToSignalOnlyRecommendations() {
+        ensureRuntimeSetup();
+
+        insert new UsageSignal__c(
+            FieldKey__c = 'Account.SignalFallback__c',
+            SampleSize__c = 150,
+            NonNullCount__c = 0,
+            NullRatePct__c = 100,
+            LastObservedOn__c = System.now(),
+            EvidenceSummary__c = 'HasData=false; ObjectRecordCount=250; MeetsMinRecordThreshold=true'
+        );
+        insert new UsageSignal__c(
+            FieldKey__c = 'Account.EmptyNoise__c',
+            SampleSize__c = 0,
+            NonNullCount__c = 0,
+            NullRatePct__c = 100,
+            LastObservedOn__c = System.now(),
+            EvidenceSummary__c = null
+        );
+
+        Test.startTest();
+        RecommendationEngine.rebuildAllRecommendations(50);
+        Test.stopTest();
+
+        List<Recommendation__c> rows = [
+            SELECT FieldKey__c, Action__c, EvidenceSummary__c
+            FROM Recommendation__c
+            WHERE FieldKey__c IN ('Account.SignalFallback__c', 'Account.EmptyNoise__c')
+        ];
+
+        System.assertEquals(1, rows.size());
+        System.assertEquals('Account.SignalFallback__c', rows[0].FieldKey__c);
+        System.assertEquals('Deprecate', rows[0].Action__c);
+        System.assert(rows[0].EvidenceSummary__c.contains('Fallback=SignalOnly'));
+    }
+
+    @IsTest
+    static void buildGlobalApexCoverageRecommendationsUsesCoverageBandsFromToolingFallback() {
+        ensureRuntimeSetup();
+
+        List<ApexClass> scopedClasses = [
+            SELECT Id, Name, Body, NamespacePrefix
+            FROM ApexClass
+            WHERE NamespacePrefix = null
+            LIMIT 20
+        ];
+
+        List<ApexClass> eligibleClasses = new List<ApexClass>();
+        for (ApexClass row : scopedClasses) {
+            if (RecommendationEngine.isCoverageScopedApexClass(row.Name, row.Body, row.NamespacePrefix)) {
+                eligibleClasses.add(row);
+            }
+            if (eligibleClasses.size() == 3) {
+                break;
+            }
+        }
+        System.assertEquals(3, eligibleClasses.size(), 'Expected at least three eligible Apex classes in the org.');
+
+        Clarity360Settings.RuntimeConfig runtime = Clarity360Settings.getRequiredRuntime();
+        ToolingApiService.setTestQueryResults(new List<ToolingApiService.ToolingQueryResult>{
+            buildCoverageQueryResult(new Map<Id, List<Decimal>>{
+                eligibleClasses[0].Id => new List<Decimal>{ 8, 2 },
+                eligibleClasses[1].Id => new List<Decimal>{ 6, 4 },
+                eligibleClasses[2].Id => new List<Decimal>{ 1, 9 }
+            }),
+            buildCoverageQueryResult(new Map<Id, List<Decimal>>{
+                eligibleClasses[1].Id => new List<Decimal>{ 7, 3 },
+                eligibleClasses[2].Id => new List<Decimal>{ 2, 8 }
+            })
+        });
+
+        Test.startTest();
+        List<Recommendation__c> recommendations =
+            RecommendationEngine.buildGlobalApexCoverageRecommendations(System.now(), 20, runtime);
+        Test.stopTest();
+        ToolingApiService.clearTestOverrides();
+
+        Map<String, Recommendation__c> byKey = new Map<String, Recommendation__c>();
+        for (Recommendation__c row : recommendations) {
+            byKey.put(row.FieldKey__c, row);
+        }
+
+        System.assertEquals('Keep', byKey.get('GLOBAL.APEXCLASS.' + eligibleClasses[0].Name).Action__c);
+        System.assert(byKey.get('GLOBAL.APEXCLASS.' + eligibleClasses[0].Name).EvidenceSummary__c.contains('CoverageBand=Good'));
+        System.assertEquals(
+            'Investigate Dependencies',
+            byKey.get('GLOBAL.APEXCLASS.' + eligibleClasses[1].Name).Action__c
+        );
+        System.assert(byKey.get('GLOBAL.APEXCLASS.' + eligibleClasses[1].Name).EvidenceSummary__c.contains('CoverageBand=Borderline'));
+        System.assert(byKey.get('GLOBAL.APEXCLASS.' + eligibleClasses[2].Name).EvidenceSummary__c.contains('CoverageBand=Low'));
     }
 
     @IsTest
@@ -524,5 +664,190 @@ private class RecommendationEngineTest {
             }
         }
         System.assertEquals(true, foundScopedRow);
+    }
+
+    @IsTest
+    static void buildFromSignalsSkipsLowEvidenceAndOutOfScopeRows() {
+        ensureRuntimeSetup();
+        FieldInventory__c customInventory = new FieldInventory__c(
+            FieldKey__c = 'Invoice__c.Optional__c',
+            ObjectApiName__c = 'Invoice__c',
+            FieldApiName__c = 'Optional__c'
+        );
+        insert customInventory;
+
+        UsageSignal__c lowEvidenceSignal = new UsageSignal__c(
+            FieldKey__c = customInventory.FieldKey__c,
+            FieldInventory__c = customInventory.Id,
+            SampleSize__c = 0,
+            NonNullCount__c = 0,
+            NullRatePct__c = 100,
+            EvidenceSummary__c =
+                'HasData=false; ObjectRecordCount=0; MeetsMinRecordThreshold=false; ' +
+                'ActiveTriggerRefs=0; InactiveTriggerRefs=0; ActiveValidationRuleRefs=0; InactiveValidationRuleRefs=0; ActiveFlowRefs=0; InactiveFlowRefs=0'
+        );
+        UsageSignal__c globalSignal = new UsageSignal__c(
+            FieldKey__c = 'GLOBAL.TRIGGER.LegacyTrigger',
+            SampleSize__c = 100,
+            NonNullCount__c = 0,
+            NullRatePct__c = 100,
+            EvidenceSummary__c = 'HasData=false; ObjectRecordCount=250; MeetsMinRecordThreshold=true'
+        );
+
+        List<Recommendation__c> recommendations = RecommendationEngine.buildFromSignals(
+            new List<UsageSignal__c>{ lowEvidenceSignal, globalSignal },
+            new Map<Id, FieldInventory__c>{
+                customInventory.Id => customInventory
+            }
+        );
+
+        System.assertEquals(0, recommendations.size(), 'Rows outside runtime scope or below the evidence floor should be skipped.');
+    }
+
+    @IsTest
+    static void buildFromSignalsEscalatesManagedAndStandardFieldsToInvestigate() {
+        ensureRuntimeSetup();
+        FieldInventory__c managedInventory = new FieldInventory__c(
+            FieldKey__c = 'Account.ns__Managed_Flag__c',
+            ObjectApiName__c = 'Account',
+            FieldApiName__c = 'ns__Managed_Flag__c'
+        );
+        FieldInventory__c standardInventory = new FieldInventory__c(
+            FieldKey__c = 'Account.Industry',
+            ObjectApiName__c = 'Account',
+            FieldApiName__c = 'Industry'
+        );
+        insert new List<FieldInventory__c>{ managedInventory, standardInventory };
+
+        UsageSignal__c managedSignal = new UsageSignal__c(
+            FieldKey__c = managedInventory.FieldKey__c,
+            FieldInventory__c = managedInventory.Id,
+            SampleSize__c = 100,
+            NonNullCount__c = 0,
+            NullRatePct__c = 100,
+            IsOnLayout__c = false,
+            EvidenceSummary__c =
+                'HasData=false; ObjectRecordCount=250; MeetsMinRecordThreshold=true; ' +
+                'ActiveTriggerRefs=0; InactiveTriggerRefs=0; ActiveValidationRuleRefs=0; InactiveValidationRuleRefs=0; ActiveFlowRefs=0; InactiveFlowRefs=0; ' +
+                'ApexClassRefs=0; AvgApexCoveragePct=90'
+        );
+        UsageSignal__c standardSignal = new UsageSignal__c(
+            FieldKey__c = standardInventory.FieldKey__c,
+            FieldInventory__c = standardInventory.Id,
+            SampleSize__c = 100,
+            NonNullCount__c = 0,
+            NullRatePct__c = 100,
+            IsOnLayout__c = false,
+            EvidenceSummary__c =
+                'HasData=false; ObjectRecordCount=250; MeetsMinRecordThreshold=true; ' +
+                'ActiveTriggerRefs=0; InactiveTriggerRefs=0; ActiveValidationRuleRefs=0; InactiveValidationRuleRefs=0; ActiveFlowRefs=0; InactiveFlowRefs=0; ' +
+                'ApexClassRefs=0; AvgApexCoveragePct=90'
+        );
+
+        List<Recommendation__c> recommendations = RecommendationEngine.buildFromSignals(
+            new List<UsageSignal__c>{ managedSignal, standardSignal },
+            new Map<Id, FieldInventory__c>{
+                managedInventory.Id => managedInventory,
+                standardInventory.Id => standardInventory
+            }
+        );
+
+        System.assertEquals(2, recommendations.size());
+        Map<String, Recommendation__c> byKey = new Map<String, Recommendation__c>();
+        for (Recommendation__c row : recommendations) {
+            byKey.put(row.FieldKey__c, row);
+        }
+        System.assertEquals('Investigate Dependencies', byKey.get(managedInventory.FieldKey__c).Action__c);
+        System.assert(byKey.get(managedInventory.FieldKey__c).RiskScore__c >= 45);
+        System.assertEquals('Investigate Dependencies', byKey.get(standardInventory.FieldKey__c).Action__c);
+        System.assert(byKey.get(standardInventory.FieldKey__c).RiskScore__c >= 40);
+    }
+
+    @IsTest
+    static void rebuildAllRecommendationsDeletesStaleRowsThatNoLongerQualify() {
+        ensureRuntimeSetup();
+        FieldInventory__c inventory = new FieldInventory__c(
+            FieldKey__c = 'Invoice__c.Obsolete__c',
+            ObjectApiName__c = 'Invoice__c',
+            FieldApiName__c = 'Obsolete__c'
+        );
+        insert inventory;
+        insert new UsageSignal__c(
+            FieldKey__c = inventory.FieldKey__c,
+            FieldInventory__c = inventory.Id,
+            SampleSize__c = 0,
+            NonNullCount__c = 0,
+            NullRatePct__c = 100,
+            LastObservedOn__c = System.now(),
+            EvidenceSummary__c =
+                'HasData=false; ObjectRecordCount=0; MeetsMinRecordThreshold=false; ' +
+                'ActiveTriggerRefs=0; InactiveTriggerRefs=0; ActiveValidationRuleRefs=0; InactiveValidationRuleRefs=0; ActiveFlowRefs=0; InactiveFlowRefs=0'
+        );
+        insert new Recommendation__c(
+            FieldKey__c = inventory.FieldKey__c,
+            FieldInventory__c = inventory.Id,
+            Action__c = 'Investigate Dependencies',
+            Status__c = 'Open'
+        );
+
+        Test.startTest();
+        RecommendationEngine.rebuildAllRecommendations(20);
+        Test.stopTest();
+
+        System.assertEquals(
+            0,
+            [SELECT COUNT() FROM Recommendation__c WHERE FieldKey__c = :inventory.FieldKey__c],
+            'Recommendations should be removed when the signal remains but no longer qualifies for generation.'
+        );
+    }
+
+    @IsTest
+    static void rebuildAllRecommendationsFallbackCoversKeepAndInvestigateBranches() {
+        ensureRuntimeSetup();
+        insert new List<UsageSignal__c>{
+            new UsageSignal__c(
+                FieldKey__c = 'Account.SignalKeep__c',
+                SampleSize__c = 100,
+                NonNullCount__c = 40,
+                NullRatePct__c = 60,
+                LastObservedOn__c = System.now(),
+                EvidenceSummary__c = 'HasData=true; ObjectRecordCount=120; MeetsMinRecordThreshold=true'
+            ),
+            new UsageSignal__c(
+                FieldKey__c = 'Account.SignalInvestigate__c',
+                SampleSize__c = 0,
+                NonNullCount__c = 0,
+                NullRatePct__c = 100,
+                LastObservedOn__c = System.now(),
+                EvidenceSummary__c = 'HasData=false; ObjectRecordCount=10; MeetsMinRecordThreshold=true'
+            )
+        };
+
+        Test.startTest();
+        RecommendationEngine.rebuildAllRecommendations(20);
+        Test.stopTest();
+
+        Map<String, Recommendation__c> rowsByKey = new Map<String, Recommendation__c>();
+        for (Recommendation__c row : [
+            SELECT FieldKey__c, Action__c, EvidenceSummary__c
+            FROM Recommendation__c
+            WHERE FieldKey__c IN ('Account.SignalKeep__c', 'Account.SignalInvestigate__c')
+        ]) {
+            rowsByKey.put(row.FieldKey__c, row);
+        }
+
+        System.assertEquals('Keep', rowsByKey.get('Account.SignalKeep__c').Action__c);
+        System.assertEquals('Investigate Dependencies', rowsByKey.get('Account.SignalInvestigate__c').Action__c);
+        System.assert(rowsByKey.get('Account.SignalKeep__c').EvidenceSummary__c.contains('Fallback=SignalOnly'));
+    }
+
+    @IsTest
+    static void triggerRiskAssessmentUsesDefaultReasonWhenNoSignalsArePresent() {
+        System.assertEquals(false, RecommendationEngine.isCoverageScopedApexClass(null, 'body', null));
+        System.assertEquals(false, RecommendationEngine.isCoverageScopedApexClass('Service', null, null));
+        System.assertEquals('unknown', RecommendationEngine.extractSharingKeyword('public class PlainService {}'));
+        System.assertEquals(false, RecommendationEngine.hasTriggerWithoutHandlerFramework(null));
+        System.assertEquals(false, RecommendationEngine.hasMixedDmlSignal(null));
+        System.assertEquals(false, RecommendationEngine.hasCrudOrFlsSignal(null));
     }
 }

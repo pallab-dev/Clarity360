@@ -116,4 +116,97 @@ private class Clarity360SetupValidationServiceTest {
 
         ToolingApiService.clearTestOverrides();
     }
+
+    @IsTest
+    static void readinessChecksWarnWhenCoverageThresholdUsesDefault() {
+        upsertRuntimeConfig(false, false, null, null);
+
+        ToolingApiService.ToolingQueryResult sessionProbe = new ToolingApiService.ToolingQueryResult();
+        sessionProbe.success = true;
+        ToolingApiService.ToolingQueryResult toolingProbe = new ToolingApiService.ToolingQueryResult();
+        toolingProbe.success = true;
+        ToolingApiService.setTestQueryResults(new List<ToolingApiService.ToolingQueryResult>{
+            sessionProbe,
+            toolingProbe
+        });
+
+        Test.startTest();
+        Clarity360SetupValidationService.ReadinessResult readiness =
+            Clarity360SetupValidationService.runReadinessChecks();
+        Test.stopTest();
+
+        Map<String, Clarity360SetupValidationService.CheckItem> byKey =
+            new Map<String, Clarity360SetupValidationService.CheckItem>();
+        for (Clarity360SetupValidationService.CheckItem item : readiness.checks) {
+            byKey.put(item.key, item);
+        }
+
+        System.assertEquals('Warning', byKey.get('runtimeChoices').status);
+        System.assert(byKey.get('runtimeChoices').message.contains('Coverage threshold is currently using the org default'));
+        System.assertEquals('Ready', byKey.get('namedCredential').status);
+        System.assertEquals('Ready', byKey.get('toolingApi').status);
+
+        ToolingApiService.clearTestOverrides();
+    }
+
+    @IsTest
+    static void readinessChecksReturnReadyWhenNamedCredentialPreferredModePasses() {
+        upsertRuntimeConfig(true, false, null, 80);
+
+        ToolingApiService.ToolingQueryResult namedCredentialProbe = new ToolingApiService.ToolingQueryResult();
+        namedCredentialProbe.success = true;
+        ToolingApiService.ToolingQueryResult toolingProbe = new ToolingApiService.ToolingQueryResult();
+        toolingProbe.success = true;
+        ToolingApiService.setTestQueryResults(new List<ToolingApiService.ToolingQueryResult>{
+            namedCredentialProbe,
+            toolingProbe
+        });
+
+        Test.startTest();
+        Clarity360SetupValidationService.ReadinessResult readiness =
+            Clarity360SetupValidationService.runReadinessChecks();
+        Test.stopTest();
+
+        Map<String, Clarity360SetupValidationService.CheckItem> byKey =
+            new Map<String, Clarity360SetupValidationService.CheckItem>();
+        for (Clarity360SetupValidationService.CheckItem item : readiness.checks) {
+            byKey.put(item.key, item);
+        }
+
+        System.assertEquals('Ready', byKey.get('runtimeChoices').status);
+        System.assertEquals('Warning', byKey.get('namedCredential').status);
+        System.assertEquals('Ready', byKey.get('toolingApi').status);
+
+        ToolingApiService.clearTestOverrides();
+    }
+
+    @IsTest
+    static void readinessChecksBlockWhenScheduledScanLacksFrequency() {
+        upsertRuntimeConfig(false, true, null, 80);
+
+        ToolingApiService.ToolingQueryResult sessionProbe = new ToolingApiService.ToolingQueryResult();
+        sessionProbe.success = true;
+        ToolingApiService.ToolingQueryResult toolingProbe = new ToolingApiService.ToolingQueryResult();
+        toolingProbe.success = true;
+        ToolingApiService.setTestQueryResults(new List<ToolingApiService.ToolingQueryResult>{
+            sessionProbe,
+            toolingProbe
+        });
+
+        Test.startTest();
+        Clarity360SetupValidationService.ReadinessResult readiness =
+            Clarity360SetupValidationService.runReadinessChecks();
+        Test.stopTest();
+
+        Map<String, Clarity360SetupValidationService.CheckItem> byKey =
+            new Map<String, Clarity360SetupValidationService.CheckItem>();
+        for (Clarity360SetupValidationService.CheckItem item : readiness.checks) {
+            byKey.put(item.key, item);
+        }
+
+        System.assertEquals('Blocked', byKey.get('runtimeChoices').status);
+        System.assert(byKey.get('runtimeChoices').message.contains('Schedule frequency must be chosen'));
+
+        ToolingApiService.clearTestOverrides();
+    }
 }
