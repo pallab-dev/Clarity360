@@ -91,26 +91,69 @@ private class InventoryRefreshQueueableTest {
     }
 
     @IsTest
-    static void executeMarksInventoryOnlyJobCompletedEvenWhenScopedObjectIsMissing() {
+    static void markCompletedStoresFinishedSummary() {
         ScanJob__c job = new ScanJob__c(
             JobType__c = 'Inventory Refresh',
             Status__c = 'Queued',
-            StartedOn__c = System.now()
+            StartedOn__c = System.now(),
+            ScopeSummary__c = 'reportRequested=true; requestId=req-complete'
         );
         insert job;
 
-        Test.startTest();
-        new InventoryRefreshQueueable(
+        InventoryRefreshQueueable queueable = new InventoryRefreshQueueable(
             job.Id,
             true,
-            1,
-            new List<String>{ 'DefinitelyMissingObject__c' },
+            5,
+            new List<String>{ 'Account' },
             0,
             0,
             0,
             0
-        ).execute(null);
+        );
+        Test.startTest();
+        queueable.launchUsageBatchOrComplete(2, 6, 1);
         Test.stopTest();
+
+        ScanJob__c refreshed = [
+            SELECT Status__c, ProgressPct__c, ScopeSummary__c, FinishedOn__c
+            FROM ScanJob__c
+            WHERE Id = :job.Id
+            LIMIT 1
+        ];
+        System.assert(refreshed.Status__c == 'Running' || refreshed.Status__c == 'Completed');
+        System.assert(refreshed.ScopeSummary__c.contains('InventoryObjects=2'));
+        System.assert(refreshed.ScopeSummary__c.contains('requestId=req-complete'));
+        if (refreshed.Status__c == 'Completed') {
+            System.assertEquals(100, refreshed.ProgressPct__c);
+            System.assertNotEquals(null, refreshed.FinishedOn__c);
+        }
+    }
+
+    @IsTest
+    static void markCompletedHelperSetsFinishedFields() {
+        ScanJob__c job = new ScanJob__c(
+            JobType__c = 'Inventory Refresh',
+            Status__c = 'Queued',
+            StartedOn__c = System.now(),
+            ScopeSummary__c = 'reportRequested=true; requestId=req-final'
+        );
+        insert job;
+
+        InventoryRefreshQueueable queueable = new InventoryRefreshQueueable(
+            job.Id,
+            true,
+            5,
+            new List<String>{ 'Account' },
+            0,
+            0,
+            0,
+            0,
+            true,
+            10,
+            2,
+            true
+        );
+        queueable.launchUsageBatchOrComplete(3, 8, 1);
 
         ScanJob__c refreshed = [
             SELECT Status__c, ProgressPct__c, ScopeSummary__c, FinishedOn__c
@@ -120,25 +163,26 @@ private class InventoryRefreshQueueableTest {
         ];
         System.assertEquals('Completed', refreshed.Status__c);
         System.assertEquals(100, refreshed.ProgressPct__c);
-        System.assert(refreshed.ScopeSummary__c.contains('InventoryObjects=0'));
+        System.assert(refreshed.ScopeSummary__c.contains('InventoryObjects=3'));
+        System.assert(refreshed.ScopeSummary__c.contains('requestId=req-final'));
         System.assertNotEquals(null, refreshed.FinishedOn__c);
     }
 
     @IsTest
-    static void executeLaunchesUsageBatchWhenRequested() {
+    static void launchUsageBatchWhenRequestedPreservesInventorySummary() {
         ScanJob__c job = new ScanJob__c(
             JobType__c = 'Full Scan',
             Status__c = 'Queued',
-            StartedOn__c = System.now()
+            StartedOn__c = System.now(),
+            ScopeSummary__c = 'reportRequested=true; reportMode=Scheduled'
         );
         insert job;
 
-        Test.startTest();
-        new InventoryRefreshQueueable(
+        InventoryRefreshQueueable queueable = new InventoryRefreshQueueable(
             job.Id,
             true,
             1,
-            new List<String>{ 'DefinitelyMissingObject__c' },
+            new List<String>{ 'Account' },
             0,
             0,
             0,
@@ -147,7 +191,10 @@ private class InventoryRefreshQueueableTest {
             10,
             2,
             false
-        ).execute(null);
+        );
+
+        Test.startTest();
+        queueable.launchUsageBatchOrComplete(4, 9, 2);
         Test.stopTest();
 
         ScanJob__c refreshed = [
@@ -157,7 +204,8 @@ private class InventoryRefreshQueueableTest {
             LIMIT 1
         ];
         System.assert(refreshed.Status__c == 'Running' || refreshed.Status__c == 'Completed');
-        System.assert(refreshed.ScopeSummary__c.contains('InventoryObjects=0'));
+        System.assert(refreshed.ScopeSummary__c.contains('InventoryObjects=4'));
+        System.assert(refreshed.ScopeSummary__c.contains('reportMode=Scheduled'));
     }
 
     @IsTest
@@ -227,7 +275,7 @@ private class InventoryRefreshQueueableTest {
     }
 
     @IsTest
-    static void executeMarksJobCompletedWhenUsageBatchIsSkippedInTests() {
+    static void launchUsageBatchOrCompleteMarksCompletedWhenSkippedInTests() {
         ScanJob__c job = new ScanJob__c(
             JobType__c = 'Full Scan',
             Status__c = 'Queued',
@@ -236,12 +284,11 @@ private class InventoryRefreshQueueableTest {
         );
         insert job;
 
-        Test.startTest();
-        new InventoryRefreshQueueable(
+        InventoryRefreshQueueable queueable = new InventoryRefreshQueueable(
             job.Id,
             true,
             1,
-            new List<String>{ 'DefinitelyMissingObject__c' },
+            new List<String>{ 'Account' },
             0,
             0,
             0,
@@ -250,7 +297,10 @@ private class InventoryRefreshQueueableTest {
             10,
             2,
             true
-        ).execute(null);
+        );
+
+        Test.startTest();
+        queueable.launchUsageBatchOrComplete(5, 12, 0);
         Test.stopTest();
 
         ScanJob__c refreshed = [
@@ -263,6 +313,6 @@ private class InventoryRefreshQueueableTest {
         System.assertEquals(100, refreshed.ProgressPct__c);
         System.assertNotEquals(null, refreshed.FinishedOn__c);
         System.assert(refreshed.ScopeSummary__c.contains('reportMode=Scheduled'));
-        System.assert(refreshed.ScopeSummary__c.contains('InventoryObjects=0'));
+        System.assert(refreshed.ScopeSummary__c.contains('InventoryObjects=5'));
     }
 }

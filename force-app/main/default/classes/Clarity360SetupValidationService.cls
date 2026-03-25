@@ -11,6 +11,28 @@ public with sharing class Clarity360SetupValidationService {
         'IsSetupComplete__c',
         'ConnectionStatus__c'
     };
+    @TestVisible private static TestOverrides testOverrides;
+
+    @TestVisible
+    private class TestOverrides {
+        public Clarity360Settings.ValidationResult developerValidation;
+        public Clarity360Settings.ValidationResult runtimeValidation;
+        public Clarity360Settings.RuntimeChoiceGuidance runtimeGuidance;
+        public Boolean adminCanAdminister;
+        public Boolean configCanRead;
+        public Boolean configCanCreate;
+        public Boolean configCanUpdate;
+        public List<String> missingReadFields;
+        public List<String> missingEditFields;
+        public List<String> missingOperationalObjects;
+        public Integer queueableLimit;
+        public Boolean storageMetricsUnavailable;
+        public Decimal storageLimit;
+        public Decimal storageUsed;
+        public Boolean coreComponentsAvailable;
+        public Boolean agentClassesAvailable;
+        public String agentRuntimeFailureMessage;
+    }
 
     public class CheckItem {
         @AuraEnabled public String key;
@@ -54,7 +76,10 @@ public with sharing class Clarity360SetupValidationService {
     }
 
     private static CheckItem checkDeveloperMetadataConfig() {
-        Clarity360Settings.ValidationResult validation = Clarity360Settings.validate();
+        Clarity360Settings.ValidationResult validation =
+            testOverrides != null && testOverrides.developerValidation != null
+                ? testOverrides.developerValidation
+                : Clarity360Settings.validate();
         if (validation.valid == true) {
             return buildItem(
                 'developerConfig',
@@ -77,10 +102,14 @@ public with sharing class Clarity360SetupValidationService {
     private static CheckItem checkUserRuntimeChoices() {
         Clarity360SetupConfigService.SetupConfigDTO config = Clarity360SetupConfigService.load();
         Clarity360Settings.ValidationResult validation =
-            Clarity360Settings.validateRuntimeSetupCompletion(config);
+            testOverrides != null && testOverrides.runtimeValidation != null
+                ? testOverrides.runtimeValidation
+                : Clarity360Settings.validateRuntimeSetupCompletion(config);
         if (validation.valid == true) {
             Clarity360Settings.RuntimeChoiceGuidance guidance =
-                Clarity360Settings.describeRuntimeChoiceGuidance(config);
+                testOverrides != null && testOverrides.runtimeGuidance != null
+                    ? testOverrides.runtimeGuidance
+                    : Clarity360Settings.describeRuntimeChoiceGuidance(config);
             if (!guidance.warnings.isEmpty()) {
                 return buildItem(
                     'runtimeChoices',
@@ -125,6 +154,18 @@ public with sharing class Clarity360SetupValidationService {
     }
 
     private static CheckItem checkAdminPrivileges() {
+        if (testOverrides != null && testOverrides.adminCanAdminister != null) {
+            Boolean canAdminister = testOverrides.adminCanAdminister == true;
+            return buildItem(
+                'adminPrivileges',
+                'Admin privileges',
+                canAdminister ? 'Ready' : 'Blocked',
+                canAdminister
+                    ? 'Running user has sufficient admin-level permissions.'
+                    : 'Running user does not have required admin-level permissions.',
+                'Assign a System Administrator profile or an equivalent permission set.'
+            );
+        }
         try {
             User running = [
                 SELECT Profile.PermissionsModifyAllData, Profile.PermissionsCustomizeApplication
@@ -170,10 +211,19 @@ public with sharing class Clarity360SetupValidationService {
     }
 
     private static CheckItem checkConfigObjectPermissions() {
-        Schema.DescribeSObjectResult describeResult = Clarity360SetupConfig__c.SObjectType.getDescribe();
-        Boolean canRead = describeResult.isAccessible();
-        Boolean canCreate = describeResult.isCreateable();
-        Boolean canUpdate = describeResult.isUpdateable();
+        Boolean canRead;
+        Boolean canCreate;
+        Boolean canUpdate;
+        if (testOverrides != null && testOverrides.configCanRead != null) {
+            canRead = testOverrides.configCanRead;
+            canCreate = testOverrides.configCanCreate == true;
+            canUpdate = testOverrides.configCanUpdate == true;
+        } else {
+            Schema.DescribeSObjectResult describeResult = Clarity360SetupConfig__c.SObjectType.getDescribe();
+            canRead = describeResult.isAccessible();
+            canCreate = describeResult.isCreateable();
+            canUpdate = describeResult.isUpdateable();
+        }
 
         if (canRead && (canCreate || canUpdate)) {
             return buildItem(
@@ -195,21 +245,27 @@ public with sharing class Clarity360SetupValidationService {
     }
 
     private static CheckItem checkConfigFieldPermissions() {
-        Map<String, Schema.SObjectField> fieldsByApi = Clarity360SetupConfig__c.SObjectType.getDescribe().fields.getMap();
         List<String> missingRead = new List<String>();
         List<String> missingEdit = new List<String>();
-
-        for (String fieldApi : REQUIRED_SETUP_FIELDS) {
-            if (!fieldsByApi.containsKey(fieldApi)) {
-                missingRead.add(fieldApi + ' (missing)');
-                continue;
+        if (testOverrides != null && testOverrides.missingReadFields != null) {
+            missingRead.addAll(testOverrides.missingReadFields);
+            if (testOverrides.missingEditFields != null) {
+                missingEdit.addAll(testOverrides.missingEditFields);
             }
-            Schema.DescribeFieldResult describeField = fieldsByApi.get(fieldApi).getDescribe();
-            if (!describeField.isAccessible()) {
-                missingRead.add(fieldApi);
-            }
-            if (!describeField.isUpdateable()) {
-                missingEdit.add(fieldApi);
+        } else {
+            Map<String, Schema.SObjectField> fieldsByApi = Clarity360SetupConfig__c.SObjectType.getDescribe().fields.getMap();
+            for (String fieldApi : REQUIRED_SETUP_FIELDS) {
+                if (!fieldsByApi.containsKey(fieldApi)) {
+                    missingRead.add(fieldApi + ' (missing)');
+                    continue;
+                }
+                Schema.DescribeFieldResult describeField = fieldsByApi.get(fieldApi).getDescribe();
+                if (!describeField.isAccessible()) {
+                    missingRead.add(fieldApi);
+                }
+                if (!describeField.isUpdateable()) {
+                    missingEdit.add(fieldApi);
+                }
             }
         }
 
@@ -242,17 +298,21 @@ public with sharing class Clarity360SetupValidationService {
 
     private static CheckItem checkOperationalObjectAccess() {
         List<String> missing = new List<String>();
-        if (!FieldInventory__c.SObjectType.getDescribe().isAccessible()) {
-            missing.add('FieldInventory__c');
-        }
-        if (!UsageSignal__c.SObjectType.getDescribe().isAccessible()) {
-            missing.add('UsageSignal__c');
-        }
-        if (!Recommendation__c.SObjectType.getDescribe().isAccessible()) {
-            missing.add('Recommendation__c');
-        }
-        if (!ScanJob__c.SObjectType.getDescribe().isAccessible()) {
-            missing.add('ScanJob__c');
+        if (testOverrides != null && testOverrides.missingOperationalObjects != null) {
+            missing.addAll(testOverrides.missingOperationalObjects);
+        } else {
+            if (!FieldInventory__c.SObjectType.getDescribe().isAccessible()) {
+                missing.add('FieldInventory__c');
+            }
+            if (!UsageSignal__c.SObjectType.getDescribe().isAccessible()) {
+                missing.add('UsageSignal__c');
+            }
+            if (!Recommendation__c.SObjectType.getDescribe().isAccessible()) {
+                missing.add('Recommendation__c');
+            }
+            if (!ScanJob__c.SObjectType.getDescribe().isAccessible()) {
+                missing.add('ScanJob__c');
+            }
         }
 
         if (missing.isEmpty()) {
@@ -275,7 +335,10 @@ public with sharing class Clarity360SetupValidationService {
     }
 
     private static CheckItem checkAsyncCapacity() {
-        Integer queueableLimit = Limits.getLimitQueueableJobs();
+        Integer queueableLimit =
+            testOverrides != null && testOverrides.queueableLimit != null
+                ? testOverrides.queueableLimit
+                : Limits.getLimitQueueableJobs();
         if (queueableLimit <= 0) {
             return buildItem(
                 'asyncCapacity',
@@ -297,6 +360,20 @@ public with sharing class Clarity360SetupValidationService {
 
     private static CheckItem checkStorageHealth() {
         try {
+            if (testOverrides != null) {
+                if (testOverrides.storageMetricsUnavailable == true) {
+                    return buildItem(
+                        'storageHealth',
+                        'Storage health',
+                        'Warning',
+                        'Data storage metrics are not available in this org context.',
+                        'Review Setup > Company Information > Storage Usage.'
+                    );
+                }
+                if (testOverrides.storageLimit != null || testOverrides.storageUsed != null) {
+                    return buildStorageHealthItem(testOverrides.storageUsed, testOverrides.storageLimit);
+                }
+            }
             Map<String, System.OrgLimit> limitsByName = System.OrgLimits.getMap();
             System.OrgLimit dataStorage = limitsByName.get('DataStorageMB');
             if (dataStorage == null) {
@@ -312,46 +389,9 @@ public with sharing class Clarity360SetupValidationService {
                 );
             }
 
-            Decimal maxValue = Decimal.valueOf(String.valueOf(dataStorage.getLimit()));
-            Decimal usedValue = Decimal.valueOf(String.valueOf(dataStorage.getValue()));
-            if (maxValue <= 0) {
-                return buildItem(
-                    'storageHealth',
-                    'Storage health',
-                    'Warning',
-                    'Data storage limit is unavailable.',
-                    'Review org limits and ensure sufficient free storage.'
-                );
-            }
-
-            Decimal usedPct = (usedValue * 100) / maxValue;
-            String usageSummary = String.valueOf(usedValue.setScale(2)) + ' of ' + String.valueOf(maxValue.setScale(2)) +
-                ' (' + String.valueOf(usedPct.setScale(2)) + '%)';
-            if (usedPct >= 100) {
-                return buildItem(
-                    'storageHealth',
-                    'Storage health',
-                    'Blocked',
-                    'Data storage is fully consumed: ' + usageSummary,
-                    'Free storage before running inventory and usage scans.'
-                );
-            }
-            if (usedPct >= 90) {
-                return buildItem(
-                    'storageHealth',
-                    'Storage health',
-                    'Warning',
-                    'Data storage is high: ' + usageSummary,
-                    'Free storage to prevent scan degradation or partial results.'
-                );
-            }
-
-            return buildItem(
-                'storageHealth',
-                'Storage health',
-                'Ready',
-                'Storage usage is healthy: ' + usageSummary,
-                'No action required.'
+            return buildStorageHealthItem(
+                Decimal.valueOf(String.valueOf(dataStorage.getValue())),
+                Decimal.valueOf(String.valueOf(dataStorage.getLimit()))
             );
         } catch (Exception ex) {
             return buildItem(
@@ -365,7 +405,10 @@ public with sharing class Clarity360SetupValidationService {
     }
 
     private static CheckItem checkCoreComponents() {
-        Boolean hasCore = Type.forName('ScanOrchestrator') != null && Type.forName('InventoryService') != null;
+        Boolean hasCore =
+            testOverrides != null && testOverrides.coreComponentsAvailable != null
+                ? testOverrides.coreComponentsAvailable
+                : Type.forName('ScanOrchestrator') != null && Type.forName('InventoryService') != null;
         return buildItem(
             'coreComponents',
             'Core package components',
@@ -501,10 +544,12 @@ public with sharing class Clarity360SetupValidationService {
     private static CheckItem checkAgentAssistantReadiness() {
         try {
             Boolean hasAgentClasses =
-                Type.forName('Clarity360AgentActions') != null &&
-                Type.forName('Clarity360ExplainRecommendationAction') != null &&
-                Type.forName('Clarity360HighRiskRecsAction') != null &&
-                Type.forName('Clarity360GetRecentScanSummaryAction') != null;
+                testOverrides != null && testOverrides.agentClassesAvailable != null
+                    ? testOverrides.agentClassesAvailable
+                    : Type.forName('Clarity360AgentActions') != null &&
+                        Type.forName('Clarity360ExplainRecommendationAction') != null &&
+                        Type.forName('Clarity360HighRiskRecsAction') != null &&
+                        Type.forName('Clarity360GetRecentScanSummaryAction') != null;
             if (!hasAgentClasses) {
                 return buildItem(
                     'agentAssistant',
@@ -519,6 +564,9 @@ public with sharing class Clarity360SetupValidationService {
             Clarity360AgentActions.getRecentScanSummary(new List<Clarity360AgentActions.GetRecentScanSummaryRequest>{
                 new Clarity360AgentActions.GetRecentScanSummaryRequest()
             });
+            if (testOverrides != null && !String.isBlank(testOverrides.agentRuntimeFailureMessage)) {
+                throw new AuraHandledException(testOverrides.agentRuntimeFailureMessage);
+            }
 
             return buildItem(
                 'agentAssistant',
@@ -554,6 +602,49 @@ public with sharing class Clarity360SetupValidationService {
         return String.join(copy, ', ');
     }
 
+    private static CheckItem buildStorageHealthItem(Decimal usedValue, Decimal maxValue) {
+        if (maxValue == null || maxValue <= 0) {
+            return buildItem(
+                'storageHealth',
+                'Storage health',
+                'Warning',
+                'Data storage limit is unavailable.',
+                'Review org limits and ensure sufficient free storage.'
+            );
+        }
+
+        Decimal safeUsed = usedValue == null ? 0 : usedValue;
+        Decimal usedPct = (safeUsed * 100) / maxValue;
+        String usageSummary = String.valueOf(safeUsed.setScale(2)) + ' of ' + String.valueOf(maxValue.setScale(2)) +
+            ' (' + String.valueOf(usedPct.setScale(2)) + '%)';
+        if (usedPct >= 100) {
+            return buildItem(
+                'storageHealth',
+                'Storage health',
+                'Blocked',
+                'Data storage is fully consumed: ' + usageSummary,
+                'Free storage before running inventory and usage scans.'
+            );
+        }
+        if (usedPct >= 90) {
+            return buildItem(
+                'storageHealth',
+                'Storage health',
+                'Warning',
+                'Data storage is high: ' + usageSummary,
+                'Free storage to prevent scan degradation or partial results.'
+            );
+        }
+
+        return buildItem(
+            'storageHealth',
+            'Storage health',
+            'Ready',
+            'Storage usage is healthy: ' + usageSummary,
+            'No action required.'
+        );
+    }
+
     private static CheckItem buildItem(String key, String label, String status, String message, String remediation) {
         CheckItem item = new CheckItem();
         item.key = key;
@@ -562,5 +653,15 @@ public with sharing class Clarity360SetupValidationService {
         item.message = message;
         item.remediation = remediation;
         return item;
+    }
+
+    @TestVisible
+    static void setTestOverrides(TestOverrides overrides) {
+        testOverrides = overrides;
+    }
+
+    @TestVisible
+    static void clearTestOverrides() {
+        testOverrides = null;
     }
 }
